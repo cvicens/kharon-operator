@@ -143,3 +143,29 @@ https://github.com/operator-framework/operator-sdk/blob/master/doc/user-guide.md
 https://www.tailored.cloud/kubernetes/write-a-kubernetes-controller-operator-sdk/
 https://flugel.it/building-custom-kubernetes-operators-part-3-building-operators-in-go-using-operator-sdk/
 https://itnext.io/debug-a-go-application-in-kubernetes-from-ide-c45ad26d8785
+
+
+# Canary Release lifecycle
+
+## Openshift Native Canary Release
+
+This Canary release is based on Openshift Routes.
+
+At the beginning a new Deployment (or DeploymentConfig) is created.
+
+Then you create a Canary (CR) object that points to this Deployment, this means that currentRelease attribute contains the ID of the Release in the Releases array, and there is a referrence object in the array pointing to the real object.
+
+(What if we had a targetRef instead of current release... then we feed the array of releases in status, )
+
+In this case, because there are no previous releases... this Canary should be exposed completely through the corresponding route, becoming primary at once.
+
+We check that this is so...
+
+```
+{"spec":{"to": {"kind": "Service","name": "ab-example-a","weight": 100}, "alternateBackends": []}}
+
+or 
+
+{"spec":{"to": {"kind": "Service","name": "ab-example-a","weight": 100}}}
+```
+

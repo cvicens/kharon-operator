@@ -2,6 +2,11 @@ package canary
 
 import (
 	"context"
+	"fmt"
+	"math"
+	"time"
+
+	//"errors"
 
 	kharonv1alpha1 "github.com/redhat/kharon-operator/pkg/apis/kharon/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
@@ -17,7 +22,19 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	logf "sigs.k8s.io/controller-runtime/pkg/runtime/log"
 	"sigs.k8s.io/controller-runtime/pkg/source"
+
+	appsv1 "k8s.io/api/apps/v1"
+	record "k8s.io/client-go/tools/record"
+
+	oappsv1 "github.com/openshift/api/apps/v1"
 )
+
+// Best practices
+const controllerName = "canary_controller"
+
+const ERROR_TARGET_REF_EMPTY = "Not a proper Canary object because TargetRef is empty"
+const ERROR_TARGET_REF_KIND = "Not a proper Canary object because TargetRef is not Deployment or DeploymentConfig"
+const ERROR_NOT_A_CANARY_OBJECT = "Not a Canary object"
 
 var log = logf.Log.WithName("controller_canary")
 
@@ -34,7 +51,10 @@ func Add(mgr manager.Manager) error {
 
 // newReconciler returns a new reconcile.Reconciler
 func newReconciler(mgr manager.Manager) reconcile.Reconciler {
-	return &ReconcileCanary{client: mgr.GetClient(), scheme: mgr.GetScheme()}
+	scheme := mgr.GetScheme()
+	oappsv1.AddToScheme(scheme)
+	// Best practices
+	return &ReconcileCanary{client: mgr.GetClient(), scheme: scheme, recorder: mgr.GetRecorder(controllerName)}
 }
 
 // add adds a new Controller to mgr with r as the reconcile.Reconciler
@@ -73,6 +93,8 @@ type ReconcileCanary struct {
 	// that reads objects from the cache and writes to the apiserver
 	client client.Client
 	scheme *runtime.Scheme
+	// Best practices...
+	recorder record.EventRecorder
 }
 
 // Reconcile reads that state of the cluster for a Canary object and makes changes based on the state read
@@ -99,6 +121,40 @@ func (r *ReconcileCanary) Reconcile(request reconcile.Request) (reconcile.Result
 		// Error reading the object - requeue the request.
 		return reconcile.Result{}, err
 	}
+
+	// Validate the CR instance
+	if ok, err := r.IsValid(instance); !ok {
+		//return reconcile.Result{}, err
+		return r.ManageError(instance, err)
+	}
+
+	// Search for the target ref
+	var target runtime.Object
+	var targetRef = instance.Spec.TargetRef
+	switch kind := instance.Spec.TargetRef.Kind; kind {
+	case "Deployment":
+		target = &appsv1.Deployment{}
+		err = r.client.Get(context.TODO(), types.NamespacedName{Name: targetRef.Name, Namespace: request.NamespacedName.Namespace}, target)
+		if err != nil && errors.IsNotFound(err) {
+			log.Info(fmt.Sprintf("Target Deployment was not found!"))
+			return r.ManageError(instance, err)
+		} else if err != nil {
+			return r.ManageError(instance, err)
+		}
+	case "DeploymentConfig":
+		target = &oappsv1.DeploymentConfig{}
+		err = r.client.Get(context.TODO(), types.NamespacedName{Name: targetRef.Name, Namespace: request.NamespacedName.Namespace}, target)
+		if err != nil && errors.IsNotFound(err) {
+			log.Info(fmt.Sprintf("Target DeploymentConfig was not found!"))
+			return r.ManageError(instance, err)
+		} else if err != nil {
+			return r.ManageError(instance, err)
+		}
+	default:
+		log.Info("==== isOther ====" + kind)
+	}
+
+	log.Info(fmt.Sprintf("==== target ==== %s", target))
 
 	// Define a new Pod object
 	pod := newPodForCR(instance)
@@ -150,4 +206,109 @@ func newPodForCR(cr *kharonv1alpha1.Canary) *corev1.Pod {
 			},
 		},
 	}
+}
+
+// IsValid checks if our CR is valid or not
+func (r *ReconcileCanary) IsValid(obj metav1.Object) (bool, error) {
+	log.Info(fmt.Sprintf("IsValid? %s", obj))
+
+	canary, ok := obj.(*kharonv1alpha1.Canary)
+	if !ok {
+		err := errors.NewBadRequest(ERROR_NOT_A_CANARY_OBJECT)
+		log.Error(err, ERROR_NOT_A_CANARY_OBJECT)
+		return false, err
+	}
+
+	if canary.Spec.TargetRef.Kind != "Deployment" && canary.Spec.TargetRef.Kind != "DeploymentConfig" {
+		err := errors.NewBadRequest(ERROR_TARGET_REF_EMPTY)
+		log.Error(err, ERROR_TARGET_REF_EMPTY)
+		return false, err
+	}
+
+	// Check if targetRelease is empty
+	if (kharonv1alpha1.Ref{}) == canary.Spec.TargetRef {
+		err := errors.NewBadRequest(ERROR_TARGET_REF_EMPTY)
+		log.Error(err, ERROR_TARGET_REF_EMPTY)
+		return false, err
+	}
+	return true, nil
+}
+
+// ManageErrorSimple manages an error object, an instance of the CR is passed along
+func (r *ReconcileCanary) ManageErrorSimple(obj metav1.Object, err error) (reconcile.Result, error) {
+	_, ok := obj.(*kharonv1alpha1.Canary)
+	if !ok {
+		return reconcile.Result{}, errors.NewBadRequest("not a Canary object")
+	}
+	// TODO: Add logic to differentiate... remediate... enqueue...
+	return reconcile.Result{}, err
+}
+
+// ManageError manages an error object, an instance of the CR is passed along
+func (r *ReconcileCanary) ManageError(obj metav1.Object, issue error) (reconcile.Result, error) {
+	runtimeObj, ok := (obj).(runtime.Object)
+	if !ok {
+		log.Error(errors.NewBadRequest("not a runtime.Object"), "passed object was not a runtime.Object", "object", obj)
+		return reconcile.Result{}, nil
+	}
+	var retryInterval time.Duration
+	r.recorder.Event(runtimeObj, "Warning", "ProcessingError", issue.Error())
+	if canary, ok := (obj).(*kharonv1alpha1.Canary); ok {
+		lastUpdate := canary.Status.LastUpdate
+		lastStatus := canary.Status.Status
+		status := kharonv1alpha1.ReconcileStatus{
+			LastUpdate: metav1.Now(),
+			Reason:     issue.Error(),
+			Status:     "Failure",
+		}
+		canary.Status.ReconcileStatus = status
+		err := r.client.Status().Update(context.Background(), runtimeObj)
+		if err != nil {
+			log.Error(err, "unable to update status")
+			return reconcile.Result{
+				RequeueAfter: time.Second,
+				Requeue:      true,
+			}, nil
+		}
+		if lastUpdate.IsZero() || lastStatus == "Success" {
+			retryInterval = time.Second
+		} else {
+			retryInterval = status.LastUpdate.Sub(lastUpdate.Time.Round(time.Second))
+		}
+	} else {
+		log.Info("object is not RecocileStatusAware, not setting status")
+		retryInterval = time.Second
+	}
+	return reconcile.Result{
+		RequeueAfter: time.Duration(math.Min(float64(retryInterval.Nanoseconds()*2), float64(time.Hour.Nanoseconds()*6))),
+		Requeue:      true,
+	}, nil
+}
+
+func (r *ReconcileCanary) ManageSuccess(obj metav1.Object) (reconcile.Result, error) {
+	runtimeObj, ok := (obj).(runtime.Object)
+	if !ok {
+		log.Error(errors.NewBadRequest("not a runtime.Object"), "passed object was not a runtime.Object", "object", obj)
+		return reconcile.Result{}, nil
+	}
+	if canary, ok := (obj).(*kharonv1alpha1.Canary); ok {
+		status := kharonv1alpha1.ReconcileStatus{
+			LastUpdate: metav1.Now(),
+			Reason:     "",
+			Status:     "Success",
+		}
+		canary.Status.ReconcileStatus = status
+
+		err := r.client.Status().Update(context.Background(), runtimeObj)
+		if err != nil {
+			log.Error(err, "unable to update status")
+			return reconcile.Result{
+				RequeueAfter: time.Second,
+				Requeue:      true,
+			}, nil
+		}
+	} else {
+		log.Info("object is not Canary, not setting status")
+	}
+	return reconcile.Result{}, nil
 }

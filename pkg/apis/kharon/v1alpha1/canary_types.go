@@ -33,13 +33,21 @@ type Metric struct {
 
 // CanaryAnalisys defines how to run analysis on a canary release
 type CanaryAnalisys struct {
-	MetricsServer string `json:"metricsServer"`
-	Interval      int64  `json:"interval"`
-	Threshold     int64  `json:"threshold"`
-	MaxWeight     int64  `json:"maxWeight"`
-	StepWeight    int64  `json:"stepWeight"`
-	Metrics       []Metric
+	MetricsServer string   `json:"metricsServer"`
+	Interval      int64    `json:"interval"`
+	Threshold     int64    `json:"threshold"`
+	MaxWeight     int64    `json:"maxWeight"`
+	StepWeight    int64    `json:"stepWeight"`
+	Metrics       []Metric `json:"metrics"`
 }
+
+// CanaryType defines the potential condition types
+type CanaryType string
+
+const (
+	Native CanaryType = "Native"
+	Istio  CanaryType = "Istio"
+)
 
 // CanarySpec defines the desired state of Canary
 // +k8s:openapi-gen=true
@@ -47,10 +55,12 @@ type CanarySpec struct {
 	// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
 	// Important: Run "operator-sdk generate k8s" to regenerate code after modifying this file
 	// Add custom validation using kubebuilder tags: https://book-v1.book.kubebuilder.io/beyond_basics/generating_crd.html
-	Enabled        bool      `json:"enabled"`
-	CurrentRelease string    `json:"currentRelease"` // Id points to element in the next array...
-	Releases       []Release `json:"releases,omitempty"`
-	CanaryAnalisys CanaryAnalisys
+
+	Enabled bool `json:"enabled"`
+	// +kubebuilder:validation:Enum=Native,Istio
+	Type           CanaryType     `json:"type"`
+	TargetRef      Ref            `json:"targetRef"`
+	CanaryAnalisys CanaryAnalisys `json:"canaryAnalisys"`
 }
 
 // CanaryConditionType defines the potential condition types
@@ -74,8 +84,10 @@ const (
 // CanaryCondition defines the desired state of Canary
 type CanaryCondition struct {
 	// Type of replication controller condition.
+	// +kubebuilder:validation:Enum=Succeded,Progressing,Failed
 	Type CanaryConditionType `json:"type" protobuf:"bytes,1,opt,name=type,casttype=CanaryConditionType"`
 	// Status of the condition, one of True, False, Unknown.
+	// +kubebuilder:validation:Enum=True,False,Unknown
 	Status ConditionStatus `json:"status" protobuf:"bytes,2,opt,name=status,casttype=ConditionStatus"`
 	// The last time the condition transitioned from one status to another.
 	// +optional
@@ -88,9 +100,18 @@ type CanaryCondition struct {
 	Message string `json:"message,omitempty" protobuf:"bytes,5,opt,name=message"`
 }
 
+type ReconcileStatus struct {
+	// +kubebuilder:validation:Enum=Success,Failure
+	Status     string      `json:"status,omitempty"`
+	LastUpdate metav1.Time `json:"lastUpdate,omitempty"`
+	Reason     string      `json:"reason,omitempty"`
+}
+
 // CanaryStatus defines the observed state of Canary
 // +k8s:openapi-gen=true
 type CanaryStatus struct {
+	ReconcileStatus `json:",inline"`
+
 	// INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
 	// Important: Run "operator-sdk generate k8s" to regenerate code after modifying this file
 	// Add custom validation using kubebuilder tags: https://book-v1.book.kubebuilder.io/beyond_basics/generating_crd.html
@@ -100,8 +121,11 @@ type CanaryStatus struct {
 	LastAppliedSpec  time.Duration `json:"lastAppliedSpec"`
 	LastPromotedSpec time.Duration `json:"lastPromotedSpec"`
 
-	// Conditions to wait... => kubectl wait canary/podinfo --for=condition=promoted
+	// Conditions used to wait like in => kubectl wait canary/podinfo --for=condition=promoted
 	Conditions []CanaryCondition
+
+	// Fed by the carany release process
+	ReleaseHistory []Release `json:"releaseHistory,omitempty"`
 }
 
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object

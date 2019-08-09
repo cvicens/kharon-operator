@@ -4,14 +4,10 @@ metadata:
   name: deployment-example-canary
 spec:
   enabled: true
-  currentRelease: v1
-  releases:
-  - id: v1
-    name: v1
-    ref:
-      apiVersion: apps/v1
-      kind: DeploymentConfig
-      name: deployment-example-v1
+  targetRef:
+    apiVersion: apps/v1
+    kind: DeploymentConfig
+    name: deployment-example-v1
   canaryAnalysis:
     metricsServer: 'https://prometheus...'
     # schedule interval (default 60s)
@@ -37,17 +33,24 @@ spec:
       threshold: 500
       interval: 30s
       prometheusQuery: ''
-status:
-  canaryWeight: 0
-  failedChecks: 0
-  iterations: 0
-  lastAppliedSpec: "14788816656920327485"
-  lastPromotedSpec: "14788816656920327485"
-  # Conditions to wait... => kubectl wait canary/podinfo --for=condition=promoted
-  conditions:
-  - lastTransitionTime: "2019-07-10T08:23:18Z"
-    lastUpdateTime: "2019-07-10T08:23:18Z"
-    message: Canary analysis completed successfully, promotion finished.
-    reason: Succeeded
-    status: "True"
-    type: Promoted
+#status:
+#  canaryWeight: 0
+#  failedChecks: 0
+#  iterations: 0
+#  lastAppliedSpec: "14788816656920327485"
+#  lastPromotedSpec: "14788816656920327485"
+#  # Conditions to wait... => kubectl wait canary/podinfo --for=condition=promoted
+#  conditions:
+#  - lastTransitionTime: "2019-07-10T08:23:18Z"
+#    lastUpdateTime: "2019-07-10T08:23:18Z"
+#    message: Canary analysis completed successfully, promotion finished.
+#    reason: Succeeded
+#    status: "True"
+#    type: Promoted
+#  releaseHistory:
+#  - id: 1
+#    name: deployment-example-v1
+#    ref:
+#      apiVersion: apps/v1
+#      kind: DeploymentConfig
+#      name: deployment-example-v1
