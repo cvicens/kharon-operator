@@ -3,6 +3,7 @@ kind: Canary
 metadata:
   name: deployment-example-canary
 spec:
+  serviceName: deployment-example
   enabled: true
   targetRef:
     apiVersion: apps.openshift.io/v1

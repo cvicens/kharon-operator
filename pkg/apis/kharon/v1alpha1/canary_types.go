@@ -81,44 +81,55 @@ type CanarySpec struct {
 type CanaryConditionType string
 
 const (
-	Promoted    CanaryConditionType = "Succeded"
-	Progressing CanaryConditionType = "Progressing"
-	Failed      CanaryConditionType = "Failed"
+	CanaryConditionTypePromoted CanaryConditionType = "Promoted"
+)
+
+// CanaryConditionReason defines the potential condition reasons
+type CanaryConditionReason string
+
+const (
+	CanaryConditionReasonInitialized CanaryConditionReason = "Initialized"
+	CanaryConditionReasonWaiting     CanaryConditionReason = "Waiting"
+	CanaryConditionReasonProgressing CanaryConditionReason = "Progressing"
+	CanaryConditionReasonFinalising  CanaryConditionReason = "Finalising"
+	CanaryConditionReasonSucceeded   CanaryConditionReason = "Succeeded"
+	CanaryConditionReasonFailed      CanaryConditionReason = "Failed"
 )
 
 // ConditionStatus defines the potential status
-type ConditionStatus string
+type CanaryConditionStatus string
 
 const (
-	ConditionTrue    ConditionStatus = "True"
-	ConditionFalse   ConditionStatus = "False"
-	ConditionUnknown ConditionStatus = "Unknown"
+	CanaryConditionStatusTrue    CanaryConditionStatus = "True"
+	CanaryConditionStatusFalse   CanaryConditionStatus = "False"
+	CanaryConditionStatusUnknown CanaryConditionStatus = "Unknown"
 )
 
 // CanaryCondition defines the desired state of Canary
 type CanaryCondition struct {
 	// Type of replication controller condition.
-	// +kubebuilder:validation:Enum=Succeded,Progressing,Failed
+	// +kubebuilder:validation:Enum=Promoted
 	Type CanaryConditionType `json:"type" protobuf:"bytes,1,opt,name=type,casttype=CanaryConditionType"`
 	// Status of the condition, one of True, False, Unknown.
 	// +kubebuilder:validation:Enum=True,False,Unknown
-	Status ConditionStatus `json:"status" protobuf:"bytes,2,opt,name=status,casttype=ConditionStatus"`
+	Status CanaryConditionStatus `json:"status" protobuf:"bytes,2,opt,name=status,casttype=ConditionStatus"`
 	// The last time the condition transitioned from one status to another.
 	// +optional
 	LastTransitionTime metav1.Time `json:"lastTransitionTime,omitempty" protobuf:"bytes,3,opt,name=lastTransitionTime"`
 	// The reason for the condition's last transition.
 	// +optional
-	Reason string `json:"reason,omitempty" protobuf:"bytes,4,opt,name=reason"`
+	// +kubebuilder:validation:Enum=Initialized,Waiting,Progressing,Finalising,Succeeded,Failed
+	Reason CanaryConditionReason `json:"reason,omitempty" protobuf:"bytes,4,opt,name=reason"`
 	// A human readable message indicating details about the transition.
 	// +optional
 	Message string `json:"message,omitempty" protobuf:"bytes,5,opt,name=message"`
 }
 
 type ReconcileStatus struct {
-	// +kubebuilder:validation:Enum=Success,Failure
-	Status     string      `json:"status,omitempty"`
-	LastUpdate metav1.Time `json:"lastUpdate,omitempty"`
-	Reason     string      `json:"reason,omitempty"`
+	// +kubebuilder:validation:Enum=Succeded,Progressing,Failed
+	Status     CanaryConditionStatus `json:"status,omitempty"`
+	LastUpdate metav1.Time           `json:"lastUpdate,omitempty"`
+	Reason     string                `json:"reason,omitempty"`
 }
 
 // CanaryStatus defines the observed state of Canary

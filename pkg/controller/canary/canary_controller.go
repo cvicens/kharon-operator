@@ -31,6 +31,7 @@ import (
 	record "k8s.io/client-go/tools/record"
 
 	oappsv1 "github.com/openshift/api/apps/v1"
+	routev1 "github.com/openshift/api/route/v1"
 )
 
 // Operator Name
@@ -55,6 +56,20 @@ type TargetServiceDef struct {
 	protocol    corev1.Protocol
 	port        int32
 	targetPort  intstr.IntOrString
+}
+
+type DestinationServiceDef struct {
+	Name   string
+	Weight int32
+}
+
+type TargetRouteDef struct {
+	routeName      string
+	namespace      string
+	selector       map[string]string
+	targetPort     intstr.IntOrString
+	primaryService *DestinationServiceDef
+	canaryService  *DestinationServiceDef
 }
 
 /**
@@ -221,6 +236,35 @@ func (r *ReconcileCanary) Reconcile(request reconcile.Request) (reconcile.Result
 	}
 
 	// We have to check if there is a Route called canary.Spec.ServiceName, otherwise create it
+	targetRoute := &routev1.Route{}
+	err = r.client.Get(context.TODO(), types.NamespacedName{Name: targetRef.Name, Namespace: instance.Namespace}, targetRoute)
+	if err != nil && errors.IsNotFound(err) {
+		portName := instance.Spec.TargetRefContainerPort.StrVal
+		if len(portName) <= 0 {
+			portName = fmt.Sprintf("%d-%s", instance.Spec.TargetRefContainerPort.IntVal, strings.ToLower(string(instance.Spec.TargetRefContainerProtocol)))
+		}
+		// The Route we need should be named as the Deployment because exposes the Deployment logic (as a canary)
+		targetRouteDef := &TargetRouteDef{
+			routeName:      instance.Spec.ServiceName,
+			namespace:      instance.Namespace,
+			selector:       instance.Spec.TargetRefSelector,
+			targetPort:     instance.Spec.TargetRefContainerPort,
+			primaryService: &DestinationServiceDef{
+				// TODO WARNING
+			},
+			canaryService: &DestinationServiceDef{
+				// TODO WARNING
+			},
+		}
+		targetRoute = newRouteFromTargetRouteDef(targetRouteDef)
+		reqLogger.Info("Creating the canary service", "CanaryService.Namespace", targetService.Namespace, "CanaryService.Name", targetService.Name)
+		err = r.client.Create(context.TODO(), targetService)
+		if err != nil {
+			return r.ManageError(instance, err)
+		}
+	} else if err != nil {
+		return r.ManageError(instance, err)
+	}
 
 	// DEFINE THIS FURTHER!
 	// Make Route point to the primary release and the canary
@@ -369,7 +413,7 @@ func (r *ReconcileCanary) ManageSuccess(obj metav1.Object) (reconcile.Result, er
 		status := kharonv1alpha1.ReconcileStatus{
 			LastUpdate: metav1.Now(),
 			Reason:     "",
-			Status:     "Success",
+			Status:     kharonv1alpha1.CanaryConditionStatusTrue,
 		}
 		canary.Status.ReconcileStatus = status
 
@@ -411,6 +455,41 @@ func newServiceFromTargetServiceDef(targetServiceDef *TargetServiceDef) *corev1.
 					TargetPort: targetServiceDef.targetPort,
 				},
 			},
+		},
+	}
+}
+
+// Creates a Route given a ...
+func newRouteFromTargetRouteDef(targetRouteDef *TargetRouteDef) *routev1.Route {
+	annotations := map[string]string{
+		"openshift.io/generated-by": operatorName,
+	}
+	alternateBackends := []routev1.RouteTargetReference{}
+	if len(targetRouteDef.canaryService.Name) > 0 {
+		canaryWeight := 100 - targetRouteDef.primaryService.Weight
+		alternateBackends = []routev1.RouteTargetReference{routev1.RouteTargetReference{
+			Kind:   "Service",
+			Name:   targetRouteDef.canaryService.Name,
+			Weight: &canaryWeight,
+		}}
+	}
+	return &routev1.Route{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        targetRouteDef.routeName,
+			Namespace:   targetRouteDef.namespace,
+			Labels:      targetRouteDef.selector,
+			Annotations: annotations,
+		},
+		Spec: routev1.RouteSpec{
+			Port: &routev1.RoutePort{
+				TargetPort: targetRouteDef.targetPort,
+			},
+			To: routev1.RouteTargetReference{
+				Kind:   "Service",
+				Name:   targetRouteDef.primaryService.Name,
+				Weight: &targetRouteDef.primaryService.Weight,
+			},
+			AlternateBackends: alternateBackends,
 		},
 	}
 }
