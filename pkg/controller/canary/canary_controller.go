@@ -4,6 +4,9 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"reflect"
+	"regexp"
+	"strings"
 	"time"
 
 	//"errors"
@@ -24,19 +27,35 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/source"
 
 	appsv1 "k8s.io/api/apps/v1"
+	intstr "k8s.io/apimachinery/pkg/util/intstr"
 	record "k8s.io/client-go/tools/record"
 
 	oappsv1 "github.com/openshift/api/apps/v1"
 )
+
+// Operator Name
+const operatorName = "KharonOperator"
 
 // Best practices
 const controllerName = "canary_controller"
 
 const ERROR_TARGET_REF_EMPTY = "Not a proper Canary object because TargetRef is empty"
 const ERROR_TARGET_REF_KIND = "Not a proper Canary object because TargetRef is not Deployment or DeploymentConfig"
+const ERROR_TARGET_REF_NOT_VALID = "Not a proper Canary object because TargetRef points to an invalid object"
 const ERROR_NOT_A_CANARY_OBJECT = "Not a Canary object"
+const ERROR_CANARY_OBJECT_NOT_VALID = "Not a valid Canary object"
 
 var log = logf.Log.WithName("controller_canary")
+
+type TargetServiceDef struct {
+	serviceName string
+	namespace   string
+	selector    map[string]string
+	portName    string
+	protocol    corev1.Protocol
+	port        int32
+	targetPort  intstr.IntOrString
+}
 
 /**
 * USER ACTION REQUIRED: This is a scaffold file intended for the user to modify with their own Controller
@@ -156,6 +175,56 @@ func (r *ReconcileCanary) Reconcile(request reconcile.Request) (reconcile.Result
 
 	log.Info(fmt.Sprintf("==== target ==== %s", target))
 
+	// Now that we have a target let's initialize the CR instance
+	if initialized, err := r.IsInitialized(instance, target); err == nil && !initialized {
+		err := r.client.Update(context.TODO(), instance)
+		if err != nil {
+			log.Error(err, "unable to update instance", "instance", instance)
+			return r.ManageError(instance, err)
+		}
+		return reconcile.Result{}, nil
+	} else {
+		if err != nil {
+			return r.ManageError(instance, err)
+		}
+	}
+
+	// Canary is inititialized, target is fine... cotainer, port... al OK
+	// We have to check if there is a Service called as the Target, otherwise create it
+
+	// Check if the primary service already exists
+	targetService := &corev1.Service{}
+	err = r.client.Get(context.TODO(), types.NamespacedName{Name: targetRef.Name, Namespace: instance.Namespace}, targetService)
+	if err != nil && errors.IsNotFound(err) {
+		portName := instance.Spec.TargetRefContainerPort.StrVal
+		if len(portName) <= 0 {
+			portName = fmt.Sprintf("%d-%s", instance.Spec.TargetRefContainerPort.IntVal, strings.ToLower(string(instance.Spec.TargetRefContainerProtocol)))
+		}
+		// The Service we need should be named as the Deployment because exposes the Deployment logic (as a canary)
+		targetServiceDef := &TargetServiceDef{
+			serviceName: targetRef.Name,
+			namespace:   instance.Namespace,
+			selector:    instance.Spec.TargetRefSelector,
+			portName:    portName,
+			protocol:    instance.Spec.TargetRefContainerProtocol,
+			port:        instance.Spec.TargetRefContainerPort.IntVal,
+			targetPort:  instance.Spec.TargetRefContainerPort,
+		}
+		targetService = newServiceFromTargetServiceDef(targetServiceDef)
+		reqLogger.Info("Creating the canary service", "CanaryService.Namespace", targetService.Namespace, "CanaryService.Name", targetService.Name)
+		err = r.client.Create(context.TODO(), targetService)
+		if err != nil {
+			return r.ManageError(instance, err)
+		}
+	} else if err != nil {
+		return r.ManageError(instance, err)
+	}
+
+	// We have to check if there is a Route called canary.Spec.ServiceName, otherwise create it
+
+	// DEFINE THIS FURTHER!
+	// Make Route point to the primary release and the canary
+
 	// Define a new Pod object
 	pod := newPodForCR(instance)
 
@@ -219,6 +288,7 @@ func (r *ReconcileCanary) IsValid(obj metav1.Object) (bool, error) {
 		return false, err
 	}
 
+	// Check kind of target
 	if canary.Spec.TargetRef.Kind != "Deployment" && canary.Spec.TargetRef.Kind != "DeploymentConfig" {
 		err := errors.NewBadRequest(ERROR_TARGET_REF_EMPTY)
 		log.Error(err, ERROR_TARGET_REF_EMPTY)
@@ -231,6 +301,9 @@ func (r *ReconcileCanary) IsValid(obj metav1.Object) (bool, error) {
 		log.Error(err, ERROR_TARGET_REF_EMPTY)
 		return false, err
 	}
+
+	// TODO Check ServiceName is not empty!
+
 	return true, nil
 }
 
@@ -285,6 +358,7 @@ func (r *ReconcileCanary) ManageError(obj metav1.Object, issue error) (reconcile
 	}, nil
 }
 
+// ManageSuccess manages a success and updates status accordingly, an instance of the CR is passed along
 func (r *ReconcileCanary) ManageSuccess(obj metav1.Object) (reconcile.Result, error) {
 	runtimeObj, ok := (obj).(runtime.Object)
 	if !ok {
@@ -311,4 +385,161 @@ func (r *ReconcileCanary) ManageSuccess(obj metav1.Object) (reconcile.Result, er
 		log.Info("object is not Canary, not setting status")
 	}
 	return reconcile.Result{}, nil
+}
+
+// Creates a Service given a TargetServiceDef
+func newServiceFromTargetServiceDef(targetServiceDef *TargetServiceDef) *corev1.Service {
+	annotations := map[string]string{
+		"openshift.io/generated-by": operatorName,
+	}
+	return &corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        targetServiceDef.serviceName,
+			Namespace:   targetServiceDef.namespace,
+			Labels:      targetServiceDef.selector,
+			Annotations: annotations,
+		},
+		Spec: corev1.ServiceSpec{
+			Type:            corev1.ServiceTypeClusterIP,
+			SessionAffinity: corev1.ServiceAffinityNone,
+			Selector:        targetServiceDef.selector,
+			Ports: []corev1.ServicePort{
+				{
+					Name:       targetServiceDef.portName,
+					Protocol:   targetServiceDef.protocol,
+					Port:       targetServiceDef.port,
+					TargetPort: targetServiceDef.targetPort,
+				},
+			},
+		},
+	}
+}
+
+// IsInitialized checks if our CR has been initialized or not
+func (r *ReconcileCanary) IsInitialized(instance metav1.Object, target runtime.Object) (bool, error) {
+	canary, ok := instance.(*kharonv1alpha1.Canary)
+	if !ok {
+		err := errors.NewBadRequest(ERROR_NOT_A_CANARY_OBJECT)
+		log.Error(err, ERROR_NOT_A_CANARY_OBJECT)
+		return false, err
+	}
+	if canary.Spec.Initialized {
+		return true, nil
+	}
+
+	// Get containers from target, if no containers target is not valid
+	containers := getContainersFromTarget(target)
+	if len(containers) <= 0 {
+		err := errors.NewBadRequest(ERROR_TARGET_REF_NOT_VALID)
+		log.Error(err, ERROR_TARGET_REF_NOT_VALID)
+		return false, err
+	}
+
+	// If no targetRefContainerName has been speficied... we'll get the first one from the target
+	if canary.Spec.TargetRefContainerName == "" {
+		canary.Spec.TargetRefContainerName = containers[0].Name
+	}
+
+	// Find the container by name, unless TargetRefContainerName was specified and wrong it won't be nil
+	container := findContainerByName(canary.Spec.TargetRefContainerName, containers)
+	if container == nil {
+		err := errors.NewBadRequest(ERROR_CANARY_OBJECT_NOT_VALID)
+		log.Error(err, ERROR_CANARY_OBJECT_NOT_VALID)
+		return false, err
+	}
+
+	// If our container has no Ports... error
+	if len(container.Ports) <= 0 {
+		err := errors.NewBadRequest(ERROR_TARGET_REF_NOT_VALID)
+		log.Error(err, ERROR_TARGET_REF_NOT_VALID)
+		return false, err
+	}
+
+	// If no TargetRefContainerPort has been specified... we'll get it from the container
+	if len(canary.Spec.TargetRefContainerPort.StrVal) <= 0 || canary.Spec.TargetRefContainerPort.IntVal <= 0 {
+		if len(container.Ports[0].Name) > 0 {
+			canary.Spec.TargetRefContainerPort = intstr.FromString(container.Ports[0].Name)
+		} else {
+			canary.Spec.TargetRefContainerPort = intstr.FromInt(int(container.Ports[0].ContainerPort))
+		}
+	}
+
+	// TODO findPortByNameOrNumber()
+
+	// If no targetRefContainerProtocol has been specified... we'll get it from the container
+	if len(canary.Spec.TargetRefContainerProtocol) <= 0 {
+		canary.Spec.TargetRefContainerProtocol = container.Ports[0].Protocol
+	}
+
+	// Get selector from target, if no selector target is not valid
+	selector := getSelectorFromTarget(target)
+	if len(selector) <= 0 {
+		err := errors.NewBadRequest(ERROR_TARGET_REF_NOT_VALID)
+		log.Error(err, ERROR_TARGET_REF_NOT_VALID)
+		return false, err
+	}
+
+	// If no selector has been specified... we'll get it from the target
+	if len(canary.Spec.TargetRefSelector) <= 0 {
+		canary.Spec.TargetRefSelector = selector
+	}
+
+	// TODO add a Finalizer...
+	// util.AddFinalizer(mycrd, controllerName)
+	canary.Spec.Initialized = true
+	return false, nil
+}
+
+func findPortByName(name string, ports []corev1.ContainerPort) *corev1.ContainerPort {
+	for _, port := range ports {
+		if port.Name == name {
+			return &port
+		}
+	}
+
+	return nil
+}
+
+func findContainerByName(name string, containers []corev1.Container) *corev1.Container {
+	for _, container := range containers {
+		if container.Name == name {
+			return &container
+		}
+	}
+
+	return nil
+}
+
+func getContainersFromTarget(target runtime.Object) []corev1.Container {
+	targetType := reflect.TypeOf(target)
+	if match, _ := regexp.MatchString(".*\\.Deployment$", targetType.String()); match {
+		return target.(*appsv1.Deployment).Spec.Template.Spec.Containers
+	} else if match, _ := regexp.MatchString(".*\\.DeploymentConfig$", targetType.String()); match {
+		return target.(*oappsv1.DeploymentConfig).Spec.Template.Spec.Containers
+	} else {
+		log.Info(fmt.Sprintf("targetType: %s CODE ERROR, TARGET TYPE NOT SUPPORTED!", targetType.Name()))
+	}
+
+	/*if strings.Contains(targetType.Name(), "v1.Deployment") {
+		return target.(*appsv1.Deployment).Spec.Template.Spec.Containers
+	} else if strings.Contains(targetType.Name(), "v1.DeploymentConfig") {
+		return target.(*oappsv1.DeploymentConfig).Spec.Template.Spec.Containers
+	} else {
+		log.Info(fmt.Sprintf("targetType: %s CODE ERROR, TARGET TYPE NOT SUPPORTED!", targetType))
+	}*/
+
+	return []corev1.Container{}
+}
+
+func getSelectorFromTarget(target runtime.Object) map[string]string {
+	targetType := reflect.TypeOf(target)
+	if match, _ := regexp.MatchString(".*\\.Deployment$", targetType.String()); match {
+		return target.(*appsv1.Deployment).Spec.Selector.MatchLabels
+	} else if match, _ := regexp.MatchString(".*\\.DeploymentConfig$", targetType.String()); match {
+		return target.(*oappsv1.DeploymentConfig).Spec.Selector
+	} else {
+		log.Info(fmt.Sprintf("targetType: %s CODE ERROR, TARGET TYPE NOT SUPPORTED!", targetType.Name()))
+	}
+
+	return map[string]string{}
 }

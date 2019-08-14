@@ -5,7 +5,7 @@ metadata:
 spec:
   enabled: true
   targetRef:
-    apiVersion: apps/v1
+    apiVersion: apps.openshift.io/v1
     kind: DeploymentConfig
     name: deployment-example-v1
   canaryAnalysis:

@@ -111,6 +111,14 @@ func (in *CanaryList) DeepCopyObject() runtime.Object {
 func (in *CanarySpec) DeepCopyInto(out *CanarySpec) {
 	*out = *in
 	out.TargetRef = in.TargetRef
+	if in.TargetRefSelector != nil {
+		in, out := &in.TargetRefSelector, &out.TargetRefSelector
+		*out = make(map[string]string, len(*in))
+		for key, val := range *in {
+			(*out)[key] = val
+		}
+	}
+	out.TargetRefContainerPort = in.TargetRefContainerPort
 	in.CanaryAnalisys.DeepCopyInto(&out.CanaryAnalisys)
 	return
 }

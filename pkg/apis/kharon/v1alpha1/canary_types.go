@@ -3,7 +3,9 @@ package v1alpha1
 import (
 	time "time"
 
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	intstr "k8s.io/apimachinery/pkg/util/intstr"
 )
 
 // EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
@@ -52,14 +54,26 @@ const (
 // CanarySpec defines the desired state of Canary
 // +k8s:openapi-gen=true
 type CanarySpec struct {
-	// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
-	// Important: Run "operator-sdk generate k8s" to regenerate code after modifying this file
-	// Add custom validation using kubebuilder tags: https://book-v1.book.kubebuilder.io/beyond_basics/generating_crd.html
-
+	// Flags if the Canary object is enabled or not
 	Enabled bool `json:"enabled"`
+	// Flags if Canary has been initialized or not
+	Initialized bool `json:"initialized"`
+	// Two types of Canary releases, Native or Istio
 	// +kubebuilder:validation:Enum=Native,Istio
-	Type           CanaryType     `json:"type"`
-	TargetRef      Ref            `json:"targetRef"`
+	Type CanaryType `json:"type"`
+	// Name of the primary service, will be used to create a Service and Route or VirtualService
+	ServiceName string `json:"serviceName"`
+	// Reference to the Deployment or DeploymentConfig from which to generate the Canary release
+	TargetRef Ref `json:"targetRef"`
+	// Selector, if empty take the labels of the template of the Target Deployment
+	TargetRefSelector map[string]string `json:"targetRefSelector"`
+	// Name of the container in the Deployment, if empty take the first one
+	TargetRefContainerName string `json:"targetRefContainerName"`
+	// Name of the port in the container in the Deployment, if empty take the first one
+	TargetRefContainerPort intstr.IntOrString `json:"targetRefContainerPort"`
+	// Protocol of container in the Deployment, if empty take the first one
+	TargetRefContainerProtocol corev1.Protocol `json:"targetRefContainerProtocol"`
+	// Canary Analisys Settings
 	CanaryAnalisys CanaryAnalisys `json:"canaryAnalisys"`
 }
 
