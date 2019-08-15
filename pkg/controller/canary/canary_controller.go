@@ -227,9 +227,13 @@ func (r *ReconcileCanary) Reconcile(request reconcile.Request) (reconcile.Result
 			targetPort:  instance.Spec.TargetRefContainerPort,
 		}
 		targetService = newServiceFromTargetServiceDef(targetServiceDef)
+		// Set Canary instance as the owner and controller
+		if err := controllerutil.SetControllerReference(instance, targetService, r.scheme); err != nil {
+			return reconcile.Result{}, err
+		}
 		reqLogger.Info("Creating the canary service", "CanaryService.Namespace", targetService.Namespace, "CanaryService.Name", targetService.Name)
 		err = r.client.Create(context.TODO(), targetService)
-		if err != nil {
+		if err != nil && !errors.IsAlreadyExists(err) {
 			return r.ManageError(instance, err)
 		}
 	} else if err != nil {
@@ -239,7 +243,9 @@ func (r *ReconcileCanary) Reconcile(request reconcile.Request) (reconcile.Result
 	// We have to check if there is a Route called canary.Spec.ServiceName, otherwise create it
 	targetRoute := &routev1.Route{}
 	err = r.client.Get(context.TODO(), types.NamespacedName{Name: instance.Spec.ServiceName, Namespace: instance.Namespace}, targetRoute)
+	log.Info(fmt.Sprintf("*** ns: %s err: %s", types.NamespacedName{Name: instance.Spec.ServiceName, Namespace: instance.Namespace}, err))
 	if err != nil && errors.IsNotFound(err) {
+		log.Info(fmt.Sprintf("**** Error Route nor found!"))
 		portName := instance.Spec.TargetRefContainerPort.StrVal
 		if len(portName) <= 0 {
 			portName = fmt.Sprintf("%d-%s", instance.Spec.TargetRefContainerPort.IntVal, strings.ToLower(string(instance.Spec.TargetRefContainerProtocol)))
@@ -275,9 +281,13 @@ func (r *ReconcileCanary) Reconcile(request reconcile.Request) (reconcile.Result
 			canaryService:  canaryService,
 		}
 		targetRoute = newRouteFromTargetRouteDef(targetRouteDef)
-		reqLogger.Info("Creating the canary route", "CanaryService.Namespace", targetService.Namespace, "CanaryService.Name", targetService.Name)
+		// Set Canary instance as the owner and controller
+		if err := controllerutil.SetControllerReference(instance, targetRoute, r.scheme); err != nil {
+			return reconcile.Result{}, err
+		}
+		reqLogger.Info("Creating the canary route", "CanaryService.Namespace", targetRoute.Namespace, "CanaryService.Name", targetRoute.Name)
 		err = r.client.Create(context.TODO(), targetRoute)
-		if err != nil {
+		if err != nil && !errors.IsAlreadyExists(err) {
 			return r.ManageError(instance, err)
 		}
 	} else if err != nil {
@@ -287,33 +297,11 @@ func (r *ReconcileCanary) Reconcile(request reconcile.Request) (reconcile.Result
 	// DEFINE THIS FURTHER!
 	// Make Route point to the primary release and the canary
 
-	// Define a new Pod object
-	pod := newPodForCR(instance)
-
-	// Set Canary instance as the owner and controller
-	if err := controllerutil.SetControllerReference(instance, pod, r.scheme); err != nil {
-		return reconcile.Result{}, err
-	}
-
-	// Check if this Pod already exists
-	found := &corev1.Pod{}
-	err = r.client.Get(context.TODO(), types.NamespacedName{Name: pod.Name, Namespace: pod.Namespace}, found)
-	if err != nil && errors.IsNotFound(err) {
-		reqLogger.Info("Creating a new Pod", "Pod.Namespace", pod.Namespace, "Pod.Name", pod.Name)
-		err = r.client.Create(context.TODO(), pod)
-		if err != nil {
-			return reconcile.Result{}, err
-		}
-
-		// Pod created successfully - don't requeue
-		return reconcile.Result{}, nil
-	} else if err != nil {
-		return reconcile.Result{}, err
-	}
+	return r.ManageSuccess(instance)
 
 	// Pod already exists - don't requeue
-	reqLogger.Info("Skip reconcile: Pod already exists", "Pod.Namespace", found.Namespace, "Pod.Name", found.Name)
-	return reconcile.Result{}, nil
+	//reqLogger.Info("Skip reconcile: Pod already exists", "Pod.Namespace", found.Namespace, "Pod.Name", found.Name)
+	//return reconcile.Result{}, nil
 }
 
 // newPodForCR returns a busybox pod with the same name/namespace as the cr
@@ -432,14 +420,17 @@ func (r *ReconcileCanary) ManageSuccess(obj metav1.Object) (reconcile.Result, er
 
 		err := r.client.Status().Update(context.Background(), runtimeObj)
 		if err != nil {
-			log.Error(err, "unable to update status")
+			log.Error(err, "Unable to update status")
+			r.recorder.Event(runtimeObj, "Warning", "ProcessingError", "Unable to update status")
 			return reconcile.Result{
 				RequeueAfter: time.Second,
 				Requeue:      true,
 			}, nil
 		}
+		r.recorder.Event(runtimeObj, "Normal", "StatusUpdate", "All good")
 	} else {
 		log.Info("object is not Canary, not setting status")
+		r.recorder.Event(runtimeObj, "Warning", "ProcessingError", "Object is not Canary, not setting status")
 	}
 	return reconcile.Result{}, nil
 }
