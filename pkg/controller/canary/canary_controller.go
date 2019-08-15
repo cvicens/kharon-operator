@@ -87,6 +87,7 @@ func Add(mgr manager.Manager) error {
 func newReconciler(mgr manager.Manager) reconcile.Reconciler {
 	scheme := mgr.GetScheme()
 	oappsv1.AddToScheme(scheme)
+	routev1.AddToScheme(scheme)
 	// Best practices
 	return &ReconcileCanary{client: mgr.GetClient(), scheme: scheme, recorder: mgr.GetRecorder(controllerName)}
 }
@@ -188,7 +189,7 @@ func (r *ReconcileCanary) Reconcile(request reconcile.Request) (reconcile.Result
 		log.Info("==== isOther ====" + kind)
 	}
 
-	log.Info(fmt.Sprintf("==== target ==== %s", target))
+	//log.Info(fmt.Sprintf("==== target ==== %s", target))
 
 	// Now that we have a target let's initialize the CR instance
 	if initialized, err := r.IsInitialized(instance, target); err == nil && !initialized {
@@ -204,7 +205,7 @@ func (r *ReconcileCanary) Reconcile(request reconcile.Request) (reconcile.Result
 		}
 	}
 
-	// Canary is inititialized, target is fine... cotainer, port... al OK
+	// Canary is inititialized, target is fine... cotainer, port... all OK
 	// We have to check if there is a Service called as the Target, otherwise create it
 
 	// Check if the primary service already exists
@@ -237,28 +238,45 @@ func (r *ReconcileCanary) Reconcile(request reconcile.Request) (reconcile.Result
 
 	// We have to check if there is a Route called canary.Spec.ServiceName, otherwise create it
 	targetRoute := &routev1.Route{}
-	err = r.client.Get(context.TODO(), types.NamespacedName{Name: targetRef.Name, Namespace: instance.Namespace}, targetRoute)
+	err = r.client.Get(context.TODO(), types.NamespacedName{Name: instance.Spec.ServiceName, Namespace: instance.Namespace}, targetRoute)
 	if err != nil && errors.IsNotFound(err) {
 		portName := instance.Spec.TargetRefContainerPort.StrVal
 		if len(portName) <= 0 {
 			portName = fmt.Sprintf("%d-%s", instance.Spec.TargetRefContainerPort.IntVal, strings.ToLower(string(instance.Spec.TargetRefContainerProtocol)))
 		}
+
+		primaryService := &DestinationServiceDef{}
+		canaryService := &DestinationServiceDef{}
+		// If there's no a previous release in the release history
+		if len(instance.Status.ReleaseHistory) <= 0 {
+			primaryService = &DestinationServiceDef{
+				Name:   targetService.Name,
+				Weight: 100,
+			}
+		} else {
+			currentRelease := instance.Status.ReleaseHistory[len(instance.Status.ReleaseHistory)-1]
+			primaryService = &DestinationServiceDef{
+				Name:   targetService.Name,
+				Weight: 100,
+			}
+			canaryService = &DestinationServiceDef{
+				Name:   currentRelease.Name,
+				Weight: 0, // TODO this has to change
+			}
+		}
+
 		// The Route we need should be named as the Deployment because exposes the Deployment logic (as a canary)
 		targetRouteDef := &TargetRouteDef{
 			routeName:      instance.Spec.ServiceName,
 			namespace:      instance.Namespace,
 			selector:       instance.Spec.TargetRefSelector,
 			targetPort:     instance.Spec.TargetRefContainerPort,
-			primaryService: &DestinationServiceDef{
-				// TODO WARNING
-			},
-			canaryService: &DestinationServiceDef{
-				// TODO WARNING
-			},
+			primaryService: primaryService,
+			canaryService:  canaryService,
 		}
 		targetRoute = newRouteFromTargetRouteDef(targetRouteDef)
-		reqLogger.Info("Creating the canary service", "CanaryService.Namespace", targetService.Namespace, "CanaryService.Name", targetService.Name)
-		err = r.client.Create(context.TODO(), targetService)
+		reqLogger.Info("Creating the canary route", "CanaryService.Namespace", targetService.Namespace, "CanaryService.Name", targetService.Name)
+		err = r.client.Create(context.TODO(), targetRoute)
 		if err != nil {
 			return r.ManageError(instance, err)
 		}
@@ -323,7 +341,7 @@ func newPodForCR(cr *kharonv1alpha1.Canary) *corev1.Pod {
 
 // IsValid checks if our CR is valid or not
 func (r *ReconcileCanary) IsValid(obj metav1.Object) (bool, error) {
-	log.Info(fmt.Sprintf("IsValid? %s", obj))
+	//log.Info(fmt.Sprintf("IsValid? %s", obj))
 
 	canary, ok := obj.(*kharonv1alpha1.Canary)
 	if !ok {
@@ -332,33 +350,28 @@ func (r *ReconcileCanary) IsValid(obj metav1.Object) (bool, error) {
 		return false, err
 	}
 
+	// Check if TargetRef is empty
+	if (kharonv1alpha1.Ref{}) == canary.Spec.TargetRef {
+		err := errors.NewBadRequest(ERROR_TARGET_REF_EMPTY)
+		log.Error(err, "TargetRef is empty")
+		return false, err
+	}
+
 	// Check kind of target
 	if canary.Spec.TargetRef.Kind != "Deployment" && canary.Spec.TargetRef.Kind != "DeploymentConfig" {
 		err := errors.NewBadRequest(ERROR_TARGET_REF_EMPTY)
-		log.Error(err, ERROR_TARGET_REF_EMPTY)
+		log.Error(err, "TargetRef is the wrong kind")
 		return false, err
 	}
 
-	// Check if targetRelease is empty
-	if (kharonv1alpha1.Ref{}) == canary.Spec.TargetRef {
-		err := errors.NewBadRequest(ERROR_TARGET_REF_EMPTY)
-		log.Error(err, ERROR_TARGET_REF_EMPTY)
+	// Check if ServiceName is empty
+	if len(canary.Spec.ServiceName) <= 0 {
+		err := errors.NewBadRequest(ERROR_CANARY_OBJECT_NOT_VALID)
+		log.Error(err, "ServiceName cannot be empty")
 		return false, err
 	}
-
-	// TODO Check ServiceName is not empty!
 
 	return true, nil
-}
-
-// ManageErrorSimple manages an error object, an instance of the CR is passed along
-func (r *ReconcileCanary) ManageErrorSimple(obj metav1.Object, err error) (reconcile.Result, error) {
-	_, ok := obj.(*kharonv1alpha1.Canary)
-	if !ok {
-		return reconcile.Result{}, errors.NewBadRequest("not a Canary object")
-	}
-	// TODO: Add logic to differentiate... remediate... enqueue...
-	return reconcile.Result{}, err
 }
 
 // ManageError manages an error object, an instance of the CR is passed along
