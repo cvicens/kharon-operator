@@ -169,3 +169,136 @@ or
 {"spec":{"to": {"kind": "Service","name": "ab-example-a","weight": 100}}}
 ```
 
+# Prepare the test
+
+Create a new DC:
+
+```
+oc new-app openshift/deployment-example:v1 --name=deployment-example-v1
+```
+
+# Build to ext reg
+
+```
+oc new-project ext-registry
+```
+
+```
+oc tag registry.access.redhat.com/openjdk/openjdk-11-rhel7:latest openshift/openjdk-11-rhel7:latest --scheduled=true -n ext-registry
+```
+
+```
+oc create secret docker-registry quay-dockercfg --docker-server=quay.io --docker-username=cvicensa --docker-password=Fomare\!01 --docker-email=cvicensa@redhat.com
+
+or 
+
+oc create secret docker-registry quay-dockercfg --docker-server=https://quay.io --docker-username=cvicensa --docker-password=Fomare\!01 --docker-email=cvicensa@redhat.com
+```
+
+```
+oc edit sa builder
+
+===
+
+apiVersion: v1
+imagePullSecrets:
+- name: builder-dockercfg-bd6lp
+kind: ServiceAccount
+metadata:
+  creationTimestamp: "2019-08-21T22:13:15Z"
+  name: builder
+  namespace: ext-registry
+  resourceVersion: "4408940"
+  selfLink: /api/v1/namespaces/ext-registry/serviceaccounts/builder
+  uid: df7a527e-c460-11e9-b595-063f19d9dd24
+secrets:
+- name: builder-token-9svbf
+- name: builder-dockercfg-bd6lp
+- name: quay-dockercfg
+```
+
+```
+oc new-build --name openshift-quickstarts-ext-bc openshift/openjdk-11-rhel7:latest~https://github.com/jboss-openshift/openshift-quickstarts --context-dir=undertow-servlet -n ext-registry
+```
+
+```
+oc edit bc/openshift-quickstarts-ext-bc
+
+===
+
+apiVersion: build.openshift.io/v1
+kind: BuildConfig
+metadata:
+  annotations:
+    openshift.io/generated-by: OpenShiftNewBuild
+  creationTimestamp: "2019-08-21T22:32:32Z"
+  labels:
+    build: openshift-quickstarts-ext-bc
+  name: openshift-quickstarts-ext-bc
+  namespace: ext-registry
+  resourceVersion: "4413649"
+  selfLink: /apis/build.openshift.io/v1/namespaces/ext-registry/buildconfigs/openshift-quickstarts-ext-bc
+  uid: 90c59a59-c463-11e9-baac-0a580a820021
+spec:
+  failedBuildsHistoryLimit: 5
+  nodeSelector: null
+  output:
+    pushSecret:
+      name: quay-dockercfg
+    to:
+      kind: DockerImage
+      name: quay.io/cvicensa/openshift-quickstarts:latest
+  postCommit: {}
+  resources: {}
+  runPolicy: Serial
+  source:
+    contextDir: undertow-servlet
+    git:
+      uri: https://github.com/jboss-openshift/openshift-quickstarts
+    type: Git
+  strategy:
+    sourceStrategy:
+      from:
+        kind: ImageStreamTag
+        name: openjdk-11-rhel7:latest
+        namespace: openshift
+    type: Source
+  successfulBuildsHistoryLimit: 5
+  triggers:
+  - github:
+      secret: sXew99-RfH55NanDcvO7
+    type: GitHub
+  - generic:
+      secret: TrHF_BuBfyZCDw7KRMwz
+    type: Generic
+  - type: ConfigChange
+  - imageChange:
+      lastTriggeredImageID: registry.access.redhat.com/openjdk/openjdk-11-rhel7@sha256:cabd10fa28a59f646111f0d9dc9596ba6b6e5bb2fb41f0994272e37b1f1036e3
+    type: ImageChange
+
+```
+
+```
+oc start-build openshift-quickstarts-ext-bc -n ext-registry
+```
+
+```
+oc logs -f bc/openshift-quickstarts-ext-bc
+```
+
+```
+oc tag quay.io/cvicensa/openshift-quickstarts:latest ext-registry/openshift-quickstarts:latest --scheduled=true -n ext-registry
+```
+
+```
+oc secrets link default quay-dockercfg --for=pull
+```
+
+
+```
+oc new-app ext-registry/openshift-quickstarts:latest
+```
+
+```
+oc expose svc/openshift-quickstarts
+```

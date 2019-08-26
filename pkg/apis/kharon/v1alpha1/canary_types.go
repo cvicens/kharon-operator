@@ -137,9 +137,7 @@ type ReconcileStatus struct {
 type CanaryStatus struct {
 	ReconcileStatus `json:",inline"`
 
-	// INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
-	// Important: Run "operator-sdk generate k8s" to regenerate code after modifying this file
-	// Add custom validation using kubebuilder tags: https://book-v1.book.kubebuilder.io/beyond_basics/generating_crd.html
+	IsCanaryRunning  bool          `json:"isCanaryRunning"`
 	CanaryWeight     int64         `json:"canaryWeight"`
 	FailedChecks     int64         `json:"failedChecks"`
 	Iterations       int64         `json:"iterations"`
@@ -147,7 +145,7 @@ type CanaryStatus struct {
 	LastPromotedSpec time.Duration `json:"lastPromotedSpec"`
 
 	// Conditions used to wait like in => kubectl wait canary/podinfo --for=condition=promoted
-	Conditions []CanaryCondition
+	Conditions []CanaryCondition `json:"conditions,omitempty"`
 
 	// Fed by the carany release process
 	ReleaseHistory []Release `json:"releaseHistory,omitempty"`

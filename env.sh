@@ -1,5 +1,8 @@
 #!/bin/sh
 
+# oc
+export PATH=~/Projects/openshift/operators/bin:$PATH
+
 # SDK VERSION
 export RELEASE_VERSION=v0.9.0
 

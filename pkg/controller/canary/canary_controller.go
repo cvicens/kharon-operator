@@ -206,8 +206,38 @@ func (r *ReconcileCanary) Reconcile(request reconcile.Request) (reconcile.Result
 	}
 
 	// Canary is inititialized, target is fine... cotainer, port... all OK
-	// We have to check if there is a Service called as the Target, otherwise create it
 
+	// First we have to figure out what action to trigger
+
+	// If there's no Primary
+	if len(instance.Status.ReleaseHistory) <= 0 {
+		// Then Primary is the TargetRef ==> Action: Create Primary Release (and leave)
+		log.Info("No Primary ==> Create Primary Release")
+		log.Info("store.dispatch({type: 'CREATE_PRIMARY_RELEASE', index: 1})")
+		return r.CreatePrimaryRelease(instance)
+	} else {
+		// Else, there's Primary
+
+		// If TargetRef is different
+		if instance.Spec.TargetRef != instance.Status.ReleaseHistory[len(instance.Status.ReleaseHistory)-1].Ref {
+			// Then TargetRef is a Canary (a Canary IS running)
+			// If Progress is < 100 % ==> Action: Progress Canary Release
+			if instance.Status.CanaryWeight < 100 {
+				log.Info("TODO store.dispatch({type: 'PROGRESS_CANARY_RELEASE', index: 1})")
+				return r.ManageSuccess(instance)
+			} else {
+				// Else ==> Action: End Canary Release ==> Action Create Primary Release From Canary
+				log.Info("TODO store.dispatch({type: 'END_CANARY_RELEASE', index: 1})")
+				return r.ManageSuccess(instance)
+			}
+		} else {
+			// If TargetRef is the same ==> Action: No Action ==> it means reset status to zero (so to speak) if it's not zero
+			log.Info("TODO store.dispatch({type: 'NO_ACTION', index: 1})")
+			return r.ManageSuccess(instance)
+		}
+	}
+
+	// We have to check if there is a Service called as the Target, otherwise create it
 	// Check if the primary service already exists
 	targetService := &corev1.Service{}
 	err = r.client.Get(context.TODO(), types.NamespacedName{Name: targetRef.Name, Namespace: instance.Namespace}, targetService)
@@ -243,32 +273,33 @@ func (r *ReconcileCanary) Reconcile(request reconcile.Request) (reconcile.Result
 	// We have to check if there is a Route called canary.Spec.ServiceName, otherwise create it
 	targetRoute := &routev1.Route{}
 	err = r.client.Get(context.TODO(), types.NamespacedName{Name: instance.Spec.ServiceName, Namespace: instance.Namespace}, targetRoute)
-	log.Info(fmt.Sprintf("*** ns: %s err: %s", types.NamespacedName{Name: instance.Spec.ServiceName, Namespace: instance.Namespace}, err))
 	if err != nil && errors.IsNotFound(err) {
-		log.Info(fmt.Sprintf("**** Error Route nor found!"))
-		portName := instance.Spec.TargetRefContainerPort.StrVal
-		if len(portName) <= 0 {
-			portName = fmt.Sprintf("%d-%s", instance.Spec.TargetRefContainerPort.IntVal, strings.ToLower(string(instance.Spec.TargetRefContainerProtocol)))
-		}
+		// There's no route, so we have to create it from a route definition object (TargetRouteDef)
+		// TargetRouteDef defines primary and canary services to route traffic to
 
+		// If there's no previous release in the release history (primary release)
+		// then, the primary service should be the target service and there should be no canary as such
 		primaryService := &DestinationServiceDef{}
 		canaryService := &DestinationServiceDef{}
-		// If there's no a previous release in the release history
 		if len(instance.Status.ReleaseHistory) <= 0 {
 			primaryService = &DestinationServiceDef{
 				Name:   targetService.Name,
 				Weight: 100,
 			}
 		} else {
-			currentRelease := instance.Status.ReleaseHistory[len(instance.Status.ReleaseHistory)-1]
+			// There is a primary release (the latest release in the history)
+			//latestRelease := instance.Status.ReleaseHistory[len(instance.Status.ReleaseHistory)-1]
+
+			// If there's no canary release running (weight is >= 0 && < 100)
+
 			primaryService = &DestinationServiceDef{
 				Name:   targetService.Name,
 				Weight: 100,
 			}
-			canaryService = &DestinationServiceDef{
-				Name:   currentRelease.Name,
-				Weight: 0, // TODO this has to change
-			}
+			//canaryService = &DestinationServiceDef{
+			//	Name:   currentRelease.Name,
+			//	Weight: 0, // TODO this has to change
+			//}
 		}
 
 		// The Route we need should be named as the Deployment because exposes the Deployment logic (as a canary)
@@ -304,27 +335,139 @@ func (r *ReconcileCanary) Reconcile(request reconcile.Request) (reconcile.Result
 	//return reconcile.Result{}, nil
 }
 
-// newPodForCR returns a busybox pod with the same name/namespace as the cr
-func newPodForCR(cr *kharonv1alpha1.Canary) *corev1.Pod {
-	labels := map[string]string{
-		"app": cr.Name,
+// CreatePrimaryRelease creates a Service for Target,
+func (r *ReconcileCanary) CreatePrimaryRelease(instance *kharonv1alpha1.Canary) (reconcile.Result, error) {
+	// Create a Service for TargetRef
+	targetService, err := r.CreateServiceForTargetRef(instance)
+	if err != nil && !errors.IsAlreadyExists(err) {
+		return r.ManageError(instance, err)
 	}
-	return &corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      cr.Name + "-pod",
-			Namespace: cr.Namespace,
-			Labels:    labels,
-		},
-		Spec: corev1.PodSpec{
-			Containers: []corev1.Container{
-				{
-					Name:    "busybox",
-					Image:   "busybox",
-					Command: []string{"sleep", "3600"},
-				},
-			},
-		},
+
+	// Create a Route that points to the targetService with no alternate service
+	primaryService := &DestinationServiceDef{
+		Name:   targetService.Name,
+		Weight: 100,
 	}
+	canaryService := &DestinationServiceDef{}
+	if _, err := r.CreateRouteForCanary(instance, primaryService, canaryService); err != nil {
+		if errors.IsAlreadyExists(err) {
+			if _, err := r.UpdateRouteDestinationsForCanary(instance, primaryService, canaryService); err != nil {
+				return r.ManageError(instance, err)
+			}
+		}
+	}
+
+	// Update Status with new Release!
+	instance.Status.IsCanaryRunning = false
+	instance.Status.CanaryWeight = 0
+	instance.Status.Iterations = 0
+	instance.Status.ReleaseHistory = append(instance.Status.ReleaseHistory, kharonv1alpha1.Release{
+		ID:   instance.Spec.TargetRef.Name,
+		Name: instance.Spec.TargetRef.Name,
+		Ref:  instance.Spec.TargetRef,
+	})
+
+	return r.ManageSuccess(instance)
+}
+
+// CreateServiceForTargetRef creates a Service for Target
+func (r *ReconcileCanary) CreateServiceForTargetRef(instance *kharonv1alpha1.Canary) (*corev1.Service, error) {
+	// We have to check if there is a Service called as the TargetRef.Name, otherwise create it
+	targetService := &corev1.Service{}
+	err := r.client.Get(context.TODO(), types.NamespacedName{Name: instance.Spec.TargetRef.Name, Namespace: instance.Namespace}, targetService)
+	if err != nil && errors.IsNotFound(err) {
+		portName := instance.Spec.TargetRefContainerPort.StrVal
+		if len(portName) <= 0 {
+			portName = fmt.Sprintf("%d-%s", instance.Spec.TargetRefContainerPort.IntVal, strings.ToLower(string(instance.Spec.TargetRefContainerProtocol)))
+		}
+		// The Service we need should be named as the Deployment because exposes the Deployment logic (as a canary)
+		targetServiceDef := &TargetServiceDef{
+			serviceName: instance.Spec.TargetRef.Name,
+			namespace:   instance.Namespace,
+			selector:    instance.Spec.TargetRefSelector,
+			portName:    portName,
+			protocol:    instance.Spec.TargetRefContainerProtocol,
+			port:        instance.Spec.TargetRefContainerPort.IntVal,
+			targetPort:  instance.Spec.TargetRefContainerPort,
+		}
+		targetService = newServiceFromTargetServiceDef(targetServiceDef)
+		// Set Canary instance as the owner and controller
+		if err := controllerutil.SetControllerReference(instance, targetService, r.scheme); err != nil {
+			return nil, err
+		}
+		log.Info("Creating the canary service", "CanaryService.Namespace", targetService.Namespace, "CanaryService.Name", targetService.Name)
+		err = r.client.Create(context.TODO(), targetService)
+		if err != nil && !errors.IsAlreadyExists(err) {
+			return nil, err
+		}
+	} else if err != nil {
+		return nil, err
+	}
+
+	return targetService, nil
+}
+
+// CreateRouteForCanary creates a Route for Target
+func (r *ReconcileCanary) CreateRouteForCanary(instance *kharonv1alpha1.Canary,
+	primaryService *DestinationServiceDef,
+	canaryService *DestinationServiceDef) (*routev1.Route, error) {
+	// We have to check if there is a Route called canary.Spec.ServiceName, otherwise create it
+	targetRoute := &routev1.Route{}
+	err := r.client.Get(context.TODO(), types.NamespacedName{Name: instance.Spec.ServiceName, Namespace: instance.Namespace}, targetRoute)
+	if err != nil && errors.IsNotFound(err) {
+		// There's no route, so we have to create it from a route definition object (TargetRouteDef)
+		// TargetRouteDef defines primary and canary services to route traffic to
+
+		// The Route we need should be named as the Deployment because exposes the Deployment logic (as a canary)
+		targetRouteDef := &TargetRouteDef{
+			routeName:      instance.Spec.ServiceName,
+			namespace:      instance.Namespace,
+			selector:       instance.Spec.TargetRefSelector,
+			targetPort:     instance.Spec.TargetRefContainerPort,
+			primaryService: primaryService,
+			canaryService:  canaryService,
+		}
+		targetRoute = newRouteFromTargetRouteDef(targetRouteDef)
+		// Set Canary instance as the owner and controller
+		if err := controllerutil.SetControllerReference(instance, targetRoute, r.scheme); err != nil {
+			return nil, err
+		}
+		log.Info("Creating the canary route", "CanaryService.Namespace", targetRoute.Namespace, "CanaryService.Name", targetRoute.Name)
+		err = r.client.Create(context.TODO(), targetRoute)
+		if err != nil && !errors.IsAlreadyExists(err) {
+			return nil, err
+		}
+		// No errors, so return created Route
+		return targetRoute, nil
+	} else if err != nil {
+		return nil, err
+	}
+
+	// Let's update the route
+	updateRouteDestinations(targetRoute, primaryService, canaryService)
+
+	return targetRoute, nil
+}
+
+// UpdateRouteForCanary updates a Route with new destinations
+func (r *ReconcileCanary) UpdateRouteDestinationsForCanary(instance *kharonv1alpha1.Canary,
+	primaryService *DestinationServiceDef,
+	canaryService *DestinationServiceDef) (*routev1.Route, error) {
+	// We have to check if there is a Route called canary.Spec.ServiceName, otherwise create it
+	targetRoute := &routev1.Route{}
+	err := r.client.Get(context.TODO(), types.NamespacedName{Name: instance.Spec.ServiceName, Namespace: instance.Namespace}, targetRoute)
+	if err == nil {
+		// Let's update the route
+		updateRouteDestinations(targetRoute, primaryService, canaryService)
+		if err := r.client.Update(context.TODO(), targetRoute); err != nil {
+			return nil, err
+		}
+
+		// No errors, so return created Route
+		return targetRoute, nil
+	}
+
+	return nil, err
 }
 
 // IsValid checks if our CR is valid or not
@@ -496,6 +639,27 @@ func newRouteFromTargetRouteDef(targetRouteDef *TargetRouteDef) *routev1.Route {
 			AlternateBackends: alternateBackends,
 		},
 	}
+}
+
+// Updates destinations of route
+func updateRouteDestinations(route *routev1.Route,
+	primaryService *DestinationServiceDef,
+	canaryService *DestinationServiceDef) {
+	route.Spec.To = routev1.RouteTargetReference{
+		Kind:   "Service",
+		Name:   primaryService.Name,
+		Weight: &primaryService.Weight,
+	}
+	alternateBackends := []routev1.RouteTargetReference{}
+	if canaryService != nil {
+		canaryWeight := 100 - primaryService.Weight
+		alternateBackends = []routev1.RouteTargetReference{routev1.RouteTargetReference{
+			Kind:   "Service",
+			Name:   canaryService.Name,
+			Weight: &canaryWeight,
+		}}
+	}
+	route.Spec.AlternateBackends = alternateBackends
 }
 
 // IsInitialized checks if our CR has been initialized or not
