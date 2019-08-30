@@ -1,20 +1,17 @@
 apiVersion: kharon.redhat.com/v1alpha1
 kind: Canary
 metadata:
-  name: deployment-example-canary
+  name: canary-1
   labels:
     app: deployment-example
 spec:
   serviceName: deployment-example
   enabled: true
-  targetRef:
-    apiVersion: apps.openshift.io/v1
-    kind: DeploymentConfig
-    name: deployment-example-v1
+  type: Native
   canaryAnalysis:
     metricsServer: 'https://prometheus...'
     # schedule interval (default 60s)
-    interval: 1m
+    interval: 20
     # max number of failed metric checks before rollback
     threshold: 5
     # max traffic percentage routed to canary
@@ -23,19 +20,21 @@ spec:
     # canary increment step
     # percentage (0-100)
     stepWeight: 10
-    metrics:
-    - name: request-success-rate
+    metric:
+      name: request-success-rate
       # minimum req success rate (non 5xx responses)
       # percentage (0-100)
       threshold: 99
-      interval: 1m
+      interval: 20
       prometheusQuery: ''
-    - name: request-duration
-      # maximum req duration P99
-      # milliseconds
-      threshold: 500
-      interval: 30s
-      prometheusQuery: ''
+  #targetRef:
+  #  apiVersion: apps.openshift.io/v1
+  #  kind: DeploymentConfig
+  #  name: deployment-example-v1
+  targetRef:
+    apiVersion: apps.openshift.io/v1
+    kind: DeploymentConfig
+    name: deployment-example-v2
 #status:
 #  canaryWeight: 0
 #  failedChecks: 0

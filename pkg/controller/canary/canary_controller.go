@@ -45,6 +45,10 @@ const ERROR_TARGET_REF_KIND = "Not a proper Canary object because TargetRef is n
 const ERROR_TARGET_REF_NOT_VALID = "Not a proper Canary object because TargetRef points to an invalid object"
 const ERROR_NOT_A_CANARY_OBJECT = "Not a Canary object"
 const ERROR_CANARY_OBJECT_NOT_VALID = "Not a valid Canary object"
+const ERROR_ROUTE_NOT_FOUND = "Route object was deleted or cannot be found"
+const ERROR_UNEXPECTED = "Unexpected error"
+const ERROR_CANARY_WEIGHT_NOT_100 = "Canary has not reached 100%"
+const WARNING_CANARY_ALREADY_ENDED = "Canary already reached 100%"
 
 var log = logf.Log.WithName("controller_canary")
 
@@ -212,32 +216,40 @@ func (r *ReconcileCanary) Reconcile(request reconcile.Request) (reconcile.Result
 	// If there's no Primary
 	if len(instance.Status.ReleaseHistory) <= 0 {
 		// Then Primary is the TargetRef ==> Action: Create Primary Release (and leave)
-		log.Info("No Primary ==> Create Primary Release")
-		log.Info("store.dispatch({type: 'CREATE_PRIMARY_RELEASE', index: 1})")
+		log.Info("dispatch({type: 'CREATE_PRIMARY_RELEASE', index: 1})")
 		return r.CreatePrimaryRelease(instance)
 	} else {
 		// Else, there's Primary
 
 		// If TargetRef is different
 		if instance.Spec.TargetRef != instance.Status.ReleaseHistory[len(instance.Status.ReleaseHistory)-1].Ref {
-			// Then TargetRef is a Canary (a Canary IS running)
-			// If Progress is < 100 % ==> Action: Progress Canary Release
-			if instance.Status.CanaryWeight < 100 {
-				log.Info("TODO store.dispatch({type: 'PROGRESS_CANARY_RELEASE', index: 1})")
-				return r.ManageSuccess(instance)
+			// Then TargetRef is a Canary (a Canary IS running OR starting)
+			// If Canary metric is not met, increase failedCheck counter
+			// If failedCheck threshold is met, rollback
+
+			// If it's been more than the interval beween Canary steps
+			log.Info(fmt.Sprintf("====> instance.Status.LastStepTime %s", instance.Status.LastStepTime))
+			timeSinceLastStep := time.Since(instance.Status.LastStepTime.Time)
+			log.Info(fmt.Sprintf("====> timeSinceLastStep %s", timeSinceLastStep))
+			if timeSinceLastStep > time.Duration(instance.Spec.CanaryAnalysis.Interval)*time.Second {
+				// If Progress is < 100 % ==> Action: Progress Canary Release
+				if instance.Status.CanaryWeight < 100 {
+					log.Info("dispatch({type: 'PROGRESS_CANARY_RELEASE', index: 1})")
+					return r.ProgressCanaryRelease(instance)
+				} else {
+					// Else ==> Action: End Canary Release ==> Action Create Primary Release From Canary
+					log.Info("dispatch({type: 'END_CANARY_RELEASE', index: 1})")
+					return r.EndCanaryRelease(instance)
+				}
 			} else {
-				// Else ==> Action: End Canary Release ==> Action Create Primary Release From Canary
-				log.Info("TODO store.dispatch({type: 'END_CANARY_RELEASE', index: 1})")
-				return r.ManageSuccess(instance)
+				return r.ManageSuccess(instance, time.Duration(instance.Spec.CanaryAnalysis.Interval)*time.Second)
 			}
 		} else {
 			// If TargetRef is the same ==> Action: No Action ==> it means reset status to zero (so to speak) if it's not zero
-			log.Info("TODO store.dispatch({type: 'NO_ACTION', index: 1})")
-			return r.ManageSuccess(instance)
+			log.Info("TODO dispatch({type: 'NO_ACTION', index: 1})")
+			return r.ManageSuccess(instance, time.Duration(instance.Spec.CanaryAnalysis.Interval)*time.Second)
 		}
 	}
-
-	return r.ManageSuccess(instance)
 }
 
 // CreatePrimaryRelease creates a Service for Target,
@@ -272,7 +284,107 @@ func (r *ReconcileCanary) CreatePrimaryRelease(instance *kharonv1alpha1.Canary) 
 		Ref:  instance.Spec.TargetRef,
 	})
 
-	return r.ManageSuccess(instance)
+	return r.ManageSuccess(instance, time.Duration(instance.Spec.CanaryAnalysis.Interval)*time.Second)
+}
+
+// ProgressCanaryRelease progresses the canary by updating its weight
+func (r *ReconcileCanary) ProgressCanaryRelease(instance *kharonv1alpha1.Canary) (reconcile.Result, error) {
+	// If Canary Weight is already >= 100, then we produce a warning
+	if instance.Status.CanaryWeight >= 100 {
+		err := errors.NewBadRequest(WARNING_CANARY_ALREADY_ENDED)
+		log.Error(err, WARNING_CANARY_ALREADY_ENDED)
+		return r.ManageError(instance, err)
+	}
+
+	// Let's calculate the next weight
+	canaryWeight := instance.Status.CanaryWeight + instance.Spec.CanaryAnalysis.StepWeight
+	// If new Canary weight is >= MaxWeigh, then set it to 100
+	if canaryWeight >= instance.Spec.CanaryAnalysis.MaxWeight {
+		canaryWeight = 100
+	}
+
+	// Fetch route
+	route := &routev1.Route{}
+	err := r.client.Get(context.TODO(), types.NamespacedName{Name: instance.Spec.ServiceName, Namespace: instance.Namespace}, route)
+	if err != nil {
+		if errors.IsNotFound(err) {
+			err := errors.NewBadRequest(ERROR_ROUTE_NOT_FOUND)
+			log.Error(err, ERROR_ROUTE_NOT_FOUND)
+			return r.ManageError(instance, err)
+		}
+		log.Error(err, ERROR_UNEXPECTED)
+		return r.ManageError(instance, err)
+	}
+
+	// Route should point to current release (latest in history) (100 - Canary Weight) and the TargetRef (Canary Weight)
+	primaryService := &DestinationServiceDef{
+		Name:   instance.Status.ReleaseHistory[len(instance.Status.ReleaseHistory)-1].Name,
+		Weight: (100 - canaryWeight),
+	}
+	canaryService := &DestinationServiceDef{
+		Name:   instance.Spec.TargetRef.Name,
+		Weight: instance.Status.CanaryWeight,
+	}
+	if _, err := r.UpdateRouteDestinationsForCanary(instance, primaryService, canaryService); err != nil {
+		return r.ManageError(instance, err)
+	}
+
+	// Update Status with our progressed Canary
+	instance.Status.IsCanaryRunning = true
+	instance.Status.CanaryWeight = canaryWeight
+	instance.Status.Iterations++
+	instance.Status.LastStepTime = metav1.Now()
+
+	log.Info(fmt.Sprintf("New status: %s", instance.Status))
+
+	return r.ManageSuccess(instance, time.Duration(instance.Spec.CanaryAnalysis.Interval)*time.Second)
+}
+
+// EndCanaryRelease ends the canary because everything went fine... so canary becomes primary
+func (r *ReconcileCanary) EndCanaryRelease(instance *kharonv1alpha1.Canary) (reconcile.Result, error) {
+	log.Info("EndCanaryRelease ==>")
+	// If Canary Weight is already < 100, then we produce a warning
+	if instance.Status.CanaryWeight < 100 {
+		err := errors.NewBadRequest(ERROR_CANARY_WEIGHT_NOT_100)
+		log.Error(err, ERROR_CANARY_WEIGHT_NOT_100)
+		return r.ManageError(instance, err)
+	}
+
+	// Fetch route
+	route := &routev1.Route{}
+	err := r.client.Get(context.TODO(), types.NamespacedName{Name: instance.Spec.ServiceName, Namespace: instance.Namespace}, route)
+	if err != nil {
+		if errors.IsNotFound(err) {
+			err := errors.NewBadRequest(ERROR_ROUTE_NOT_FOUND)
+			log.Error(err, ERROR_ROUTE_NOT_FOUND)
+			return r.ManageError(instance, err)
+		}
+		log.Error(err, ERROR_UNEXPECTED)
+		return r.ManageError(instance, err)
+	}
+
+	// Route should point to TargetRef (Canary Weight 100)
+	primaryService := &DestinationServiceDef{
+		Name:   instance.Spec.TargetRef.Name,
+		Weight: 100,
+	}
+	canaryService := &DestinationServiceDef{}
+	if _, err := r.UpdateRouteDestinationsForCanary(instance, primaryService, canaryService); err != nil {
+		return r.ManageError(instance, err)
+	}
+
+	// Update Status with new primary
+	instance.Status.IsCanaryRunning = false
+	instance.Status.CanaryWeight = 0
+	instance.Status.ReleaseHistory = append(instance.Status.ReleaseHistory, kharonv1alpha1.Release{
+		ID:   instance.Spec.TargetRef.Name,
+		Name: instance.Spec.TargetRef.Name,
+		Ref:  instance.Spec.TargetRef,
+	})
+	instance.Status.Iterations++
+	instance.Status.LastStepTime = metav1.Time{}
+
+	return r.ManageSuccess(instance, time.Duration(instance.Spec.CanaryAnalysis.Interval)*time.Second)
 }
 
 // CreateServiceForTargetRef creates a Service for Target
@@ -407,6 +519,13 @@ func (r *ReconcileCanary) IsValid(obj metav1.Object) (bool, error) {
 		return false, err
 	}
 
+	// Check if CanaryAnalysis is empty
+	if (kharonv1alpha1.CanaryAnalysis{}) == canary.Spec.CanaryAnalysis {
+		err := errors.NewBadRequest(ERROR_CANARY_OBJECT_NOT_VALID)
+		log.Error(err, "CanaryAnalysis cannot be empty")
+		return false, err
+	}
+
 	return true, nil
 }
 
@@ -452,7 +571,8 @@ func (r *ReconcileCanary) ManageError(obj metav1.Object, issue error) (reconcile
 }
 
 // ManageSuccess manages a success and updates status accordingly, an instance of the CR is passed along
-func (r *ReconcileCanary) ManageSuccess(obj metav1.Object) (reconcile.Result, error) {
+func (r *ReconcileCanary) ManageSuccess(obj metav1.Object, requeueAfter time.Duration) (reconcile.Result, error) {
+	log.Info(fmt.Sprintf("===> ManageSuccess with requeueAfter: %d", requeueAfter))
 	runtimeObj, ok := (obj).(runtime.Object)
 	if !ok {
 		log.Error(errors.NewBadRequest("not a runtime.Object"), "passed object was not a runtime.Object", "object", obj)
@@ -479,6 +599,13 @@ func (r *ReconcileCanary) ManageSuccess(obj metav1.Object) (reconcile.Result, er
 	} else {
 		log.Info("object is not Canary, not setting status")
 		r.recorder.Event(runtimeObj, "Warning", "ProcessingError", "Object is not Canary, not setting status")
+	}
+
+	if requeueAfter > 0 {
+		return reconcile.Result{
+			RequeueAfter: requeueAfter,
+			Requeue:      true,
+		}, nil
 	}
 	return reconcile.Result{}, nil
 }
@@ -556,7 +683,7 @@ func updateRouteDestinations(route *routev1.Route,
 		Weight: &primaryService.Weight,
 	}
 	alternateBackends := []routev1.RouteTargetReference{}
-	if canaryService != nil {
+	if canaryService != nil && (DestinationServiceDef{}) != *canaryService {
 		canaryWeight := 100 - primaryService.Weight
 		alternateBackends = []routev1.RouteTargetReference{routev1.RouteTargetReference{
 			Kind:   "Service",
