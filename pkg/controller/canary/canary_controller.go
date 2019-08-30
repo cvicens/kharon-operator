@@ -20,8 +20,10 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	logf "sigs.k8s.io/controller-runtime/pkg/runtime/log"
 	"sigs.k8s.io/controller-runtime/pkg/source"
@@ -104,8 +106,53 @@ func add(mgr manager.Manager, r reconcile.Reconciler) error {
 		return err
 	}
 
+	predicate := predicate.Funcs{
+		UpdateFunc: func(e event.UpdateEvent) bool {
+			log.Info("serviceConfigOk (predicate->UpdateFunc)")
+			// Check that new and old objects are the expected type
+			_, ok := e.ObjectOld.(*kharonv1alpha1.Canary)
+			if !ok {
+				log.Error(nil, "Update event has no old proper runtime object to update", "event", e)
+				return false
+			}
+			newServiceConfig, ok := e.ObjectNew.(*kharonv1alpha1.Canary)
+			if !ok {
+				log.Error(nil, "Update event has no proper new runtime object for update", "event", e)
+				return false
+			}
+			if !newServiceConfig.Spec.Enabled {
+				log.Error(nil, "Runtime object is not enabled", "event", e)
+				return false
+			}
+
+			// Also check ff no change in ResourceGeneration to return false
+			if e.MetaOld == nil {
+				log.Error(nil, "Update event has no old metadata", "event", e)
+				return false
+			}
+			if e.MetaNew == nil {
+				log.Error(nil, "Update event has no new metadata", "event", e)
+				return false
+			}
+			if e.MetaNew.GetGeneration() == e.MetaOld.GetGeneration() {
+				return false
+			}
+
+			return true
+		},
+		CreateFunc: func(e event.CreateEvent) bool {
+			log.Info("canaryOk (predicate->CreateFunc)")
+			_, ok := e.Object.(*kharonv1alpha1.Canary)
+			if !ok {
+				return false
+			}
+
+			return true
+		},
+	}
+
 	// Watch for changes to primary resource Canary
-	err = c.Watch(&source.Kind{Type: &kharonv1alpha1.Canary{}}, &handler.EnqueueRequestForObject{})
+	err = c.Watch(&source.Kind{Type: &kharonv1alpha1.Canary{}}, &handler.EnqueueRequestForObject{}, predicate)
 	if err != nil {
 		return err
 	}
@@ -228,7 +275,6 @@ func (r *ReconcileCanary) Reconcile(request reconcile.Request) (reconcile.Result
 			// If failedCheck threshold is met, rollback
 
 			// If it's been more than the interval beween Canary steps
-			log.Info(fmt.Sprintf("====> instance.Status.LastStepTime %s", instance.Status.LastStepTime))
 			timeSinceLastStep := time.Since(instance.Status.LastStepTime.Time)
 			log.Info(fmt.Sprintf("====> timeSinceLastStep %s", timeSinceLastStep))
 			if timeSinceLastStep > time.Duration(instance.Spec.CanaryAnalysis.Interval)*time.Second {
@@ -242,12 +288,13 @@ func (r *ReconcileCanary) Reconcile(request reconcile.Request) (reconcile.Result
 					return r.EndCanaryRelease(instance)
 				}
 			} else {
-				return r.ManageSuccess(instance, time.Duration(instance.Spec.CanaryAnalysis.Interval)*time.Second)
+				return r.ManageSuccess(instance, time.Duration(instance.Spec.CanaryAnalysis.Interval)*time.Second, "timeSinceLastStep <")
 			}
 		} else {
 			// If TargetRef is the same ==> Action: No Action ==> it means reset status to zero (so to speak) if it's not zero
 			log.Info("TODO dispatch({type: 'NO_ACTION', index: 1})")
-			return r.ManageSuccess(instance, time.Duration(instance.Spec.CanaryAnalysis.Interval)*time.Second)
+			//return r.ManageSuccess(instance, time.Duration(instance.Spec.CanaryAnalysis.Interval)*time.Second, "NO_ACTION")
+			return r.ManageSuccess(instance, 0, "NO_ACTION")
 		}
 	}
 }
@@ -284,7 +331,7 @@ func (r *ReconcileCanary) CreatePrimaryRelease(instance *kharonv1alpha1.Canary) 
 		Ref:  instance.Spec.TargetRef,
 	})
 
-	return r.ManageSuccess(instance, time.Duration(instance.Spec.CanaryAnalysis.Interval)*time.Second)
+	return r.ManageSuccess(instance, time.Duration(instance.Spec.CanaryAnalysis.Interval)*time.Second, "CreatePrimaryRelease")
 }
 
 // ProgressCanaryRelease progresses the canary by updating its weight
@@ -335,9 +382,7 @@ func (r *ReconcileCanary) ProgressCanaryRelease(instance *kharonv1alpha1.Canary)
 	instance.Status.Iterations++
 	instance.Status.LastStepTime = metav1.Now()
 
-	log.Info(fmt.Sprintf("New status: %s", instance.Status))
-
-	return r.ManageSuccess(instance, time.Duration(instance.Spec.CanaryAnalysis.Interval)*time.Second)
+	return r.ManageSuccess(instance, time.Duration(instance.Spec.CanaryAnalysis.Interval)*time.Second, "ProgressCanaryRelease")
 }
 
 // EndCanaryRelease ends the canary because everything went fine... so canary becomes primary
@@ -384,7 +429,7 @@ func (r *ReconcileCanary) EndCanaryRelease(instance *kharonv1alpha1.Canary) (rec
 	instance.Status.Iterations++
 	instance.Status.LastStepTime = metav1.Time{}
 
-	return r.ManageSuccess(instance, time.Duration(instance.Spec.CanaryAnalysis.Interval)*time.Second)
+	return r.ManageSuccess(instance, time.Duration(instance.Spec.CanaryAnalysis.Interval)*time.Second, "EndCanaryRelease")
 }
 
 // CreateServiceForTargetRef creates a Service for Target
@@ -571,8 +616,8 @@ func (r *ReconcileCanary) ManageError(obj metav1.Object, issue error) (reconcile
 }
 
 // ManageSuccess manages a success and updates status accordingly, an instance of the CR is passed along
-func (r *ReconcileCanary) ManageSuccess(obj metav1.Object, requeueAfter time.Duration) (reconcile.Result, error) {
-	log.Info(fmt.Sprintf("===> ManageSuccess with requeueAfter: %d", requeueAfter))
+func (r *ReconcileCanary) ManageSuccess(obj metav1.Object, requeueAfter time.Duration, from string) (reconcile.Result, error) {
+	log.Info(fmt.Sprintf("===> ManageSuccess with requeueAfter: %d from: %s", requeueAfter, from))
 	runtimeObj, ok := (obj).(runtime.Object)
 	if !ok {
 		log.Error(errors.NewBadRequest("not a runtime.Object"), "passed object was not a runtime.Object", "object", obj)
@@ -595,7 +640,7 @@ func (r *ReconcileCanary) ManageSuccess(obj metav1.Object, requeueAfter time.Dur
 				Requeue:      true,
 			}, nil
 		}
-		r.recorder.Event(runtimeObj, "Normal", "StatusUpdate", "All good")
+		//r.recorder.Event(runtimeObj, "Normal", "StatusUpdate", "All good")
 	} else {
 		log.Info("object is not Canary, not setting status")
 		r.recorder.Event(runtimeObj, "Warning", "ProcessingError", "Object is not Canary, not setting status")
