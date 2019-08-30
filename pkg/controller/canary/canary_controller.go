@@ -640,7 +640,9 @@ func (r *ReconcileCanary) ManageSuccess(obj metav1.Object, requeueAfter time.Dur
 				Requeue:      true,
 			}, nil
 		}
-		//r.recorder.Event(runtimeObj, "Normal", "StatusUpdate", "All good")
+		if canary.Status.IsCanaryRunning {
+			r.recorder.Event(runtimeObj, "Normal", "StatusUpdate", fmt.Sprintf("Canary in progress %d%%", canary.Status.CanaryWeight))
+		}
 	} else {
 		log.Info("object is not Canary, not setting status")
 		r.recorder.Event(runtimeObj, "Warning", "ProcessingError", "Object is not Canary, not setting status")
