@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"net/http"
 	"os"
 	"runtime"
 
@@ -28,6 +29,11 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	logf "sigs.k8s.io/controller-runtime/pkg/runtime/log"
 	"sigs.k8s.io/controller-runtime/pkg/runtime/signals"
+
+	// Metrics... for now
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 // Change below variables to serve metrics on different host or port.
@@ -37,6 +43,14 @@ var (
 	operatorMetricsPort int32 = 8686
 )
 var log = logf.Log.WithName("cmd")
+
+// Metrics... for now
+var (
+	opsProcessed = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "myapp_processed_ops_total",
+		Help: "The total number of processed events",
+	})
+)
 
 func printVersion() {
 	log.Info(fmt.Sprintf("Go Version: %s", runtime.Version()))
@@ -128,6 +142,16 @@ func main() {
 		log.Info(err.Error())
 	}
 
+	// Metrics... for now
+	go func() {
+		log.Info("Prometheus => serving on 2112")
+		http.Handle("/prometheus", promhttp.Handler())
+		if err := http.ListenAndServe(":2112", nil); err != nil {
+			log.Error(err, "Prometheus => ListenAndServe exited non-zero")
+			os.Exit(1)
+		}
+	}()
+
 	log.Info("Starting the Cmd.")
 
 	// Start the Cmd
@@ -135,11 +159,37 @@ func main() {
 		log.Error(err, "Manager exited non-zero")
 		os.Exit(1)
 	}
+
 }
 
 // serveCRMetrics gets the Operator/CustomResource GVKs and generates metrics based on those types.
 // It serves those metrics on "http://metricsHost:operatorMetricsPort".
 func serveCRMetrics(cfg *rest.Config) error {
+	// Below function returns filtered operator/CustomResource specific GVKs.
+	// For more control override the below GVK list with your own custom logic.
+	filteredGVK, err := k8sutil.GetGVKsFromAddToScheme(apis.AddToScheme)
+	if err != nil {
+		return err
+	}
+	// Get the namespace the operator is currently deployed in.
+	operatorNs, err := k8sutil.GetOperatorNamespace()
+	if err != nil {
+		return err
+	}
+	// To generate metrics in other namespaces, add the values below.
+	ns := []string{operatorNs}
+	// Generate and serve custom resource specific metrics.
+	err = kubemetrics.GenerateAndServeCRMetrics(cfg, ns, filteredGVK, metricsHost, operatorMetricsPort)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+// serveCustomMetrics gets ...
+// TODO: use this instead of a new Prometheus endpoint... see this:
+// - https://github.com/operator-framework/operator-sdk/blob/master/doc/proposals/metering-operator-metrics.md
+func serveCustomMetrics(cfg *rest.Config) error {
 	// Below function returns filtered operator/CustomResource specific GVKs.
 	// For more control override the below GVK list with your own custom logic.
 	filteredGVK, err := k8sutil.GetGVKsFromAddToScheme(apis.AddToScheme)

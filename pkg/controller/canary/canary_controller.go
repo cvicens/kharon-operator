@@ -34,6 +34,10 @@ import (
 
 	oappsv1 "github.com/openshift/api/apps/v1"
 	routev1 "github.com/openshift/api/route/v1"
+
+	// Custom metrics
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
 )
 
 // Operator Name
@@ -53,6 +57,18 @@ const ERROR_CANARY_WEIGHT_NOT_100 = "Canary has not reached 100%"
 const WARNING_CANARY_ALREADY_ENDED = "Canary already reached 100%"
 
 var log = logf.Log.WithName("controller_canary")
+
+// Custom metrics
+var (
+	currentCanaryWeight = promauto.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "kharon_current_canary_weight",
+		Help: "Weight of the current canary release",
+	},
+		[]string{
+			"namespace",
+			"canary",
+		})
+)
 
 type TargetServiceDef struct {
 	serviceName string
@@ -381,6 +397,8 @@ func (r *ReconcileCanary) ProgressCanaryRelease(instance *kharonv1alpha1.Canary)
 	instance.Status.CanaryWeight = canaryWeight
 	instance.Status.Iterations++
 	instance.Status.LastStepTime = metav1.Now()
+
+	currentCanaryWeight.WithLabelValues(instance.Namespace, instance.Name).Set(float64(canaryWeight))
 
 	return r.ManageSuccess(instance, time.Duration(instance.Spec.CanaryAnalysis.Interval)*time.Second, "ProgressCanaryRelease")
 }
