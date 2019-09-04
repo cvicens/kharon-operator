@@ -46,15 +46,17 @@ const operatorName = "KharonOperator"
 // Best practices
 const controllerName = "canary_controller"
 
-const ERROR_TARGET_REF_EMPTY = "Not a proper Canary object because TargetRef is empty"
-const ERROR_TARGET_REF_KIND = "Not a proper Canary object because TargetRef is not Deployment or DeploymentConfig"
-const ERROR_TARGET_REF_NOT_VALID = "Not a proper Canary object because TargetRef points to an invalid object"
-const ERROR_NOT_A_CANARY_OBJECT = "Not a Canary object"
-const ERROR_CANARY_OBJECT_NOT_VALID = "Not a valid Canary object"
-const ERROR_ROUTE_NOT_FOUND = "Route object was deleted or cannot be found"
-const ERROR_UNEXPECTED = "Unexpected error"
-const ERROR_CANARY_WEIGHT_NOT_100 = "Canary has not reached 100%"
-const WARNING_CANARY_ALREADY_ENDED = "Canary already reached 100%"
+const (
+	errorTargetRefEmpty       = "Not a proper Canary object because TargetRef is empty"
+	errorTargetRefKind        = "Not a proper Canary object because TargetRef is not Deployment or DeploymentConfig"
+	errorTargetRefNotValid    = "Not a proper Canary object because TargetRef points to an invalid object"
+	errorNotACanaryObject     = "Not a Canary object"
+	errorCanaryObjectNotValid = "Not a valid Canary object"
+	errorRouteNotFound        = "Route object was deleted or cannot be found"
+	errorUnexpected           = "Unexpected error"
+	errorCanaryWeightNot100   = "Canary has not reached 100%"
+	warningCanaryAlreadyEnded = "Canary already reached 100%"
+)
 
 var log = logf.Log.WithName("controller_canary")
 
@@ -67,9 +69,11 @@ var (
 		[]string{
 			"namespace",
 			"canary",
+			"target",
 		})
 )
 
+// TargetServiceDef collects data to create a Service
 type TargetServiceDef struct {
 	serviceName string
 	namespace   string
@@ -80,11 +84,13 @@ type TargetServiceDef struct {
 	targetPort  intstr.IntOrString
 }
 
+// DestinationServiceDef collects data to define To and/or AlternateBackEnds in Route
 type DestinationServiceDef struct {
 	Name   string
 	Weight int32
 }
 
+// TargetRouteDef collects data to create a Route
 type TargetRouteDef struct {
 	routeName      string
 	namespace      string
@@ -354,8 +360,8 @@ func (r *ReconcileCanary) CreatePrimaryRelease(instance *kharonv1alpha1.Canary) 
 func (r *ReconcileCanary) ProgressCanaryRelease(instance *kharonv1alpha1.Canary) (reconcile.Result, error) {
 	// If Canary Weight is already >= 100, then we produce a warning
 	if instance.Status.CanaryWeight >= 100 {
-		err := errors.NewBadRequest(WARNING_CANARY_ALREADY_ENDED)
-		log.Error(err, WARNING_CANARY_ALREADY_ENDED)
+		err := errors.NewBadRequest(warningCanaryAlreadyEnded)
+		log.Error(err, warningCanaryAlreadyEnded)
 		return r.ManageError(instance, err)
 	}
 
@@ -371,11 +377,11 @@ func (r *ReconcileCanary) ProgressCanaryRelease(instance *kharonv1alpha1.Canary)
 	err := r.client.Get(context.TODO(), types.NamespacedName{Name: instance.Spec.ServiceName, Namespace: instance.Namespace}, route)
 	if err != nil {
 		if errors.IsNotFound(err) {
-			err := errors.NewBadRequest(ERROR_ROUTE_NOT_FOUND)
-			log.Error(err, ERROR_ROUTE_NOT_FOUND)
+			err := errors.NewBadRequest(errorRouteNotFound)
+			log.Error(err, errorRouteNotFound)
 			return r.ManageError(instance, err)
 		}
-		log.Error(err, ERROR_UNEXPECTED)
+		log.Error(err, errorUnexpected)
 		return r.ManageError(instance, err)
 	}
 
@@ -398,7 +404,7 @@ func (r *ReconcileCanary) ProgressCanaryRelease(instance *kharonv1alpha1.Canary)
 	instance.Status.Iterations++
 	instance.Status.LastStepTime = metav1.Now()
 
-	currentCanaryWeight.WithLabelValues(instance.Namespace, instance.Name).Set(float64(canaryWeight))
+	currentCanaryWeight.WithLabelValues(instance.Namespace, instance.Name, instance.Spec.TargetRef.Name).Set(float64(canaryWeight))
 
 	return r.ManageSuccess(instance, time.Duration(instance.Spec.CanaryAnalysis.Interval)*time.Second, "ProgressCanaryRelease")
 }
@@ -408,8 +414,8 @@ func (r *ReconcileCanary) EndCanaryRelease(instance *kharonv1alpha1.Canary) (rec
 	log.Info("EndCanaryRelease ==>")
 	// If Canary Weight is already < 100, then we produce a warning
 	if instance.Status.CanaryWeight < 100 {
-		err := errors.NewBadRequest(ERROR_CANARY_WEIGHT_NOT_100)
-		log.Error(err, ERROR_CANARY_WEIGHT_NOT_100)
+		err := errors.NewBadRequest(errorCanaryWeightNot100)
+		log.Error(err, errorCanaryWeightNot100)
 		return r.ManageError(instance, err)
 	}
 
@@ -418,11 +424,11 @@ func (r *ReconcileCanary) EndCanaryRelease(instance *kharonv1alpha1.Canary) (rec
 	err := r.client.Get(context.TODO(), types.NamespacedName{Name: instance.Spec.ServiceName, Namespace: instance.Namespace}, route)
 	if err != nil {
 		if errors.IsNotFound(err) {
-			err := errors.NewBadRequest(ERROR_ROUTE_NOT_FOUND)
-			log.Error(err, ERROR_ROUTE_NOT_FOUND)
+			err := errors.NewBadRequest(errorRouteNotFound)
+			log.Error(err, errorRouteNotFound)
 			return r.ManageError(instance, err)
 		}
-		log.Error(err, ERROR_UNEXPECTED)
+		log.Error(err, errorUnexpected)
 		return r.ManageError(instance, err)
 	}
 
@@ -529,7 +535,7 @@ func (r *ReconcileCanary) CreateRouteForCanary(instance *kharonv1alpha1.Canary,
 	return targetRoute, nil
 }
 
-// UpdateRouteForCanary updates a Route with new destinations
+// UpdateRouteDestinationsForCanary updates a Route with new destinations
 func (r *ReconcileCanary) UpdateRouteDestinationsForCanary(instance *kharonv1alpha1.Canary,
 	primaryService *DestinationServiceDef,
 	canaryService *DestinationServiceDef) (*routev1.Route, error) {
@@ -556,35 +562,35 @@ func (r *ReconcileCanary) IsValid(obj metav1.Object) (bool, error) {
 
 	canary, ok := obj.(*kharonv1alpha1.Canary)
 	if !ok {
-		err := errors.NewBadRequest(ERROR_NOT_A_CANARY_OBJECT)
-		log.Error(err, ERROR_NOT_A_CANARY_OBJECT)
+		err := errors.NewBadRequest(errorNotACanaryObject)
+		log.Error(err, errorNotACanaryObject)
 		return false, err
 	}
 
 	// Check if TargetRef is empty
 	if (kharonv1alpha1.Ref{}) == canary.Spec.TargetRef {
-		err := errors.NewBadRequest(ERROR_TARGET_REF_EMPTY)
+		err := errors.NewBadRequest(errorTargetRefEmpty)
 		log.Error(err, "TargetRef is empty")
 		return false, err
 	}
 
 	// Check kind of target
 	if canary.Spec.TargetRef.Kind != "Deployment" && canary.Spec.TargetRef.Kind != "DeploymentConfig" {
-		err := errors.NewBadRequest(ERROR_TARGET_REF_EMPTY)
+		err := errors.NewBadRequest(errorTargetRefEmpty)
 		log.Error(err, "TargetRef is the wrong kind")
 		return false, err
 	}
 
 	// Check if ServiceName is empty
 	if len(canary.Spec.ServiceName) <= 0 {
-		err := errors.NewBadRequest(ERROR_CANARY_OBJECT_NOT_VALID)
+		err := errors.NewBadRequest(errorCanaryObjectNotValid)
 		log.Error(err, "ServiceName cannot be empty")
 		return false, err
 	}
 
 	// Check if CanaryAnalysis is empty
 	if (kharonv1alpha1.CanaryAnalysis{}) == canary.Spec.CanaryAnalysis {
-		err := errors.NewBadRequest(ERROR_CANARY_OBJECT_NOT_VALID)
+		err := errors.NewBadRequest(errorCanaryObjectNotValid)
 		log.Error(err, "CanaryAnalysis cannot be empty")
 		return false, err
 	}
@@ -763,8 +769,8 @@ func updateRouteDestinations(route *routev1.Route,
 func (r *ReconcileCanary) IsInitialized(instance metav1.Object, target runtime.Object) (bool, error) {
 	canary, ok := instance.(*kharonv1alpha1.Canary)
 	if !ok {
-		err := errors.NewBadRequest(ERROR_NOT_A_CANARY_OBJECT)
-		log.Error(err, ERROR_NOT_A_CANARY_OBJECT)
+		err := errors.NewBadRequest(errorNotACanaryObject)
+		log.Error(err, errorNotACanaryObject)
 		return false, err
 	}
 	if canary.Spec.Initialized {
@@ -774,8 +780,8 @@ func (r *ReconcileCanary) IsInitialized(instance metav1.Object, target runtime.O
 	// Get containers from target, if no containers target is not valid
 	containers := getContainersFromTarget(target)
 	if len(containers) <= 0 {
-		err := errors.NewBadRequest(ERROR_TARGET_REF_NOT_VALID)
-		log.Error(err, ERROR_TARGET_REF_NOT_VALID)
+		err := errors.NewBadRequest(errorTargetRefNotValid)
+		log.Error(err, errorTargetRefNotValid)
 		return false, err
 	}
 
@@ -787,15 +793,15 @@ func (r *ReconcileCanary) IsInitialized(instance metav1.Object, target runtime.O
 	// Find the container by name, unless TargetRefContainerName was specified and wrong it won't be nil
 	container := findContainerByName(canary.Spec.TargetRefContainerName, containers)
 	if container == nil {
-		err := errors.NewBadRequest(ERROR_CANARY_OBJECT_NOT_VALID)
-		log.Error(err, ERROR_CANARY_OBJECT_NOT_VALID)
+		err := errors.NewBadRequest(errorCanaryObjectNotValid)
+		log.Error(err, errorCanaryObjectNotValid)
 		return false, err
 	}
 
 	// If our container has no Ports... error
 	if len(container.Ports) <= 0 {
-		err := errors.NewBadRequest(ERROR_TARGET_REF_NOT_VALID)
-		log.Error(err, ERROR_TARGET_REF_NOT_VALID)
+		err := errors.NewBadRequest(errorTargetRefNotValid)
+		log.Error(err, errorTargetRefNotValid)
 		return false, err
 	}
 
@@ -818,8 +824,8 @@ func (r *ReconcileCanary) IsInitialized(instance metav1.Object, target runtime.O
 	// Get selector from target, if no selector target is not valid
 	selector := getSelectorFromTarget(target)
 	if len(selector) <= 0 {
-		err := errors.NewBadRequest(ERROR_TARGET_REF_NOT_VALID)
-		log.Error(err, ERROR_TARGET_REF_NOT_VALID)
+		err := errors.NewBadRequest(errorTargetRefNotValid)
+		log.Error(err, errorTargetRefNotValid)
 		return false, err
 	}
 

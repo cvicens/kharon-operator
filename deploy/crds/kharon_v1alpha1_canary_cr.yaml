@@ -27,14 +27,18 @@ spec:
       threshold: 99
       interval: 20
       prometheusQuery: ''
-  #targetRef:
-  #  apiVersion: apps.openshift.io/v1
-  #  kind: DeploymentConfig
-  #  name: deployment-example-v1
   targetRef:
     apiVersion: apps.openshift.io/v1
     kind: DeploymentConfig
-    name: deployment-example-v2
+    name: kharon-test-v1-0-0
+  #targetRef:
+  #  apiVersion: apps.openshift.io/v1
+  #  kind: DeploymentConfig
+  #  name: kharon-test-v1-1-0
+  #targetRef:
+  #  apiVersion: apps.openshift.io/v1
+  #  kind: DeploymentConfig
+  #  name: kharon-test-v1-2-0
 #status:
 #  canaryWeight: 0
 #  failedChecks: 0
