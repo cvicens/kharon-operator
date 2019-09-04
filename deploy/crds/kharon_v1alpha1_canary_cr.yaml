@@ -27,6 +27,7 @@ spec:
       threshold: 99
       interval: 20
       prometheusQuery: ''
+  targetRefContainerPort: '8080-tcp' # If you don't specify this... maybe the order of ports is not correct and you'll get another port...
   targetRef:
     apiVersion: apps.openshift.io/v1
     kind: DeploymentConfig

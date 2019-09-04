@@ -47,15 +47,18 @@ const operatorName = "KharonOperator"
 const controllerName = "canary_controller"
 
 const (
-	errorTargetRefEmpty       = "Not a proper Canary object because TargetRef is empty"
-	errorTargetRefKind        = "Not a proper Canary object because TargetRef is not Deployment or DeploymentConfig"
-	errorTargetRefNotValid    = "Not a proper Canary object because TargetRef points to an invalid object"
-	errorNotACanaryObject     = "Not a Canary object"
-	errorCanaryObjectNotValid = "Not a valid Canary object"
-	errorRouteNotFound        = "Route object was deleted or cannot be found"
-	errorUnexpected           = "Unexpected error"
-	errorCanaryWeightNot100   = "Canary has not reached 100%"
-	warningCanaryAlreadyEnded = "Canary already reached 100%"
+	errorTargetRefEmpty              = "Not a proper Canary object because TargetRef is empty"
+	errorTargetRefContainerPortEmpty = "Not a proper Canary object because TargetRefContainerPort is empty"
+	errorTargetRefKind               = "Not a proper Canary object because TargetRef is not Deployment or DeploymentConfig"
+	errorServiceNameEmpty            = "Not a proper Canary object because ServiceName is empty"
+	errorCanaryAnalysisEmpty         = "Not a proper Canary object because CanaryAnalysis is empty"
+	errorTargetRefNotValid           = "Not a proper Canary object because TargetRef points to an invalid object"
+	errorNotACanaryObject            = "Not a Canary object"
+	errorCanaryObjectNotValid        = "Not a valid Canary object"
+	errorRouteNotFound               = "Route object was deleted or cannot be found"
+	errorUnexpected                  = "Unexpected error"
+	errorCanaryWeightNot100          = "Canary has not reached 100%"
+	warningCanaryAlreadyEnded        = "Canary already reached 100%"
 )
 
 var log = logf.Log.WithName("controller_canary")
@@ -232,7 +235,6 @@ func (r *ReconcileCanary) Reconcile(request reconcile.Request) (reconcile.Result
 
 	// Validate the CR instance
 	if ok, err := r.IsValid(instance); !ok {
-		//return reconcile.Result{}, err
 		return r.ManageError(instance, err)
 	}
 
@@ -570,28 +572,35 @@ func (r *ReconcileCanary) IsValid(obj metav1.Object) (bool, error) {
 	// Check if TargetRef is empty
 	if (kharonv1alpha1.Ref{}) == canary.Spec.TargetRef {
 		err := errors.NewBadRequest(errorTargetRefEmpty)
-		log.Error(err, "TargetRef is empty")
+		log.Error(err, errorTargetRefEmpty)
+		return false, err
+	}
+
+	// Check if TargetRefContainerPort is empty
+	if len(canary.Spec.TargetRefContainerPort.StrVal) <= 0 && canary.Spec.TargetRefContainerPort.IntVal <= 0 {
+		err := errors.NewBadRequest(errorTargetRefContainerPortEmpty)
+		log.Error(err, errorTargetRefContainerPortEmpty)
 		return false, err
 	}
 
 	// Check kind of target
 	if canary.Spec.TargetRef.Kind != "Deployment" && canary.Spec.TargetRef.Kind != "DeploymentConfig" {
-		err := errors.NewBadRequest(errorTargetRefEmpty)
-		log.Error(err, "TargetRef is the wrong kind")
+		err := errors.NewBadRequest(errorTargetRefKind)
+		log.Error(err, errorTargetRefKind)
 		return false, err
 	}
 
 	// Check if ServiceName is empty
 	if len(canary.Spec.ServiceName) <= 0 {
-		err := errors.NewBadRequest(errorCanaryObjectNotValid)
-		log.Error(err, "ServiceName cannot be empty")
+		err := errors.NewBadRequest(errorServiceNameEmpty)
+		log.Error(err, errorServiceNameEmpty)
 		return false, err
 	}
 
 	// Check if CanaryAnalysis is empty
 	if (kharonv1alpha1.CanaryAnalysis{}) == canary.Spec.CanaryAnalysis {
-		err := errors.NewBadRequest(errorCanaryObjectNotValid)
-		log.Error(err, "CanaryAnalysis cannot be empty")
+		err := errors.NewBadRequest(errorCanaryAnalysisEmpty)
+		log.Error(err, errorCanaryAnalysisEmpty)
 		return false, err
 	}
 
@@ -806,7 +815,8 @@ func (r *ReconcileCanary) IsInitialized(instance metav1.Object, target runtime.O
 	}
 
 	// If no TargetRefContainerPort has been specified... we'll get it from the container
-	if len(canary.Spec.TargetRefContainerPort.StrVal) <= 0 || canary.Spec.TargetRefContainerPort.IntVal <= 0 {
+	if len(canary.Spec.TargetRefContainerPort.StrVal) <= 0 && canary.Spec.TargetRefContainerPort.IntVal <= 0 {
+		log.Info(fmt.Sprintf("canary.Spec.TargetRefContainerPort empty!"))
 		if len(container.Ports[0].Name) > 0 {
 			canary.Spec.TargetRefContainerPort = intstr.FromString(container.Ports[0].Name)
 		} else {
