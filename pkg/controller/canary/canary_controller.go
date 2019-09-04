@@ -880,14 +880,6 @@ func getContainersFromTarget(target runtime.Object) []corev1.Container {
 		log.Info(fmt.Sprintf("targetType: %s CODE ERROR, TARGET TYPE NOT SUPPORTED!", targetType.Name()))
 	}
 
-	/*if strings.Contains(targetType.Name(), "v1.Deployment") {
-		return target.(*appsv1.Deployment).Spec.Template.Spec.Containers
-	} else if strings.Contains(targetType.Name(), "v1.DeploymentConfig") {
-		return target.(*oappsv1.DeploymentConfig).Spec.Template.Spec.Containers
-	} else {
-		log.Info(fmt.Sprintf("targetType: %s CODE ERROR, TARGET TYPE NOT SUPPORTED!", targetType))
-	}*/
-
 	return []corev1.Container{}
 }
 
