@@ -1,6 +1,6 @@
-package util/metrics
+package metrics
 
-type metric struct {
+type Metric struct {
 	API              string `json:"api"`
 	Endpoint         string `json:"endpoint"`
 	ExportedEndpoint string `json:"exported_endpoint"`
@@ -12,17 +12,17 @@ type metric struct {
 	Service          string `json:"service"`
 }
 
-type result struct {
-	Metric metric        `json:"metric"`
+type Result struct {
+	Metric Metric        `json:"metric"`
 	Value  []interface{} `json:"value"`
 }
 
-type data struct {
-	Result     []result `json:"result"`
+type Data struct {
+	Result     []Result `json:"result"`
 	ResultType string   `json:"resultType"`
 }
 
-type PrometheusApiResponse struct {
-	Data   data   `json:"data"`
+type Reponse struct {
+	Data   Data   `json:"data"`
 	Status string `json:"status"`
 }
