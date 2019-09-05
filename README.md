@@ -15,7 +15,7 @@ export GO111MODULE=on
 # Create new operator
 
 ```
-export OPERATOR_NAME="service-config-operator"
+export OPERATOR_NAME="kharon-operator"
 export API_VERSION="cloudnative.redhat.com/v1alpha1"
 
 mkdir -p $GOPATH/src/github.com/redhat
@@ -188,11 +188,11 @@ oc tag registry.access.redhat.com/openjdk/openjdk-11-rhel7:latest openshift/open
 ```
 
 ```
-oc create secret docker-registry quay-dockercfg --docker-server=quay.io --docker-username=cvicensa --docker-password=Fomare\!01 --docker-email=cvicensa@redhat.com
+oc create secret docker-registry quay-dockercfg --docker-server=quay.io --docker-username=cvicensa --docker-password=<password> --docker-email=cvicensa@redhat.com
 
 or 
 
-oc create secret docker-registry quay-dockercfg --docker-server=https://quay.io --docker-username=cvicensa --docker-password=Fomare\!01 --docker-email=cvicensa@redhat.com
+oc create secret docker-registry quay-dockercfg --docker-server=https://quay.io --docker-username=cvicensa --docker-password=<password> --docker-email=cvicensa@redhat.com
 ```
 
 ```

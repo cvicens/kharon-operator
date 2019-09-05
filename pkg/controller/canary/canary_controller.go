@@ -1,15 +1,17 @@
 package canary
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"math"
+	"net/http"
 	"reflect"
 	"regexp"
 	"strings"
+	"text/template"
 	"time"
-
-	//"errors"
 
 	kharonv1alpha1 "github.com/redhat/kharon-operator/pkg/apis/kharon/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
@@ -294,8 +296,21 @@ func (r *ReconcileCanary) Reconcile(request reconcile.Request) (reconcile.Result
 
 		// If TargetRef is different
 		if instance.Spec.TargetRef != instance.Status.ReleaseHistory[len(instance.Status.ReleaseHistory)-1].Ref {
-			// Then TargetRef is a Canary (a Canary IS running OR starting)
+
+			// Then TargetRef is a Canary (a Canary IS already running OR starting)
+
 			// If Canary metric is not met, increase failedCheck counter
+			var metricQueryResult map[string]interface{}
+			if metricQueryURL, err := mountMetricQueryURL(instance); err == nil {
+				if err := runMetricQuery(metricQueryURL, &metricQueryResult); err != nil {
+					log.Error(err, "Error when querying the metrics server")
+				}
+				log.Info(fmt.Sprintf(">>>>> metric: %s", prettyPrint(metricQueryResult)))
+			} else {
+				log.Error(err, "Error when mounting the metrics URL")
+			}
+			log.Info(fmt.Sprintf(">>>>> metric: %s", metricQueryResult["value"]))
+
 			// If failedCheck threshold is met, rollback
 
 			// If it's been more than the interval beween Canary steps
@@ -312,7 +327,7 @@ func (r *ReconcileCanary) Reconcile(request reconcile.Request) (reconcile.Result
 					return r.EndCanaryRelease(instance)
 				}
 			} else {
-				return r.ManageSuccess(instance, time.Duration(instance.Spec.CanaryAnalysis.Interval)*time.Second, "timeSinceLastStep <")
+				return r.ManageSuccess(instance, time.Duration(instance.Spec.CanaryAnalysis.Metric.Interval)*time.Second, "timeSinceLastStep <")
 			}
 		} else {
 			// If TargetRef is the same ==> Action: No Action ==> it means reset status to zero (so to speak) if it's not zero
@@ -321,6 +336,20 @@ func (r *ReconcileCanary) Reconcile(request reconcile.Request) (reconcile.Result
 			return r.ManageSuccess(instance, 0, "NO_ACTION")
 		}
 	}
+}
+
+func mountMetricQueryURL(instance *kharonv1alpha1.Canary) (string, error) {
+	var query bytes.Buffer
+	tmpl, err := template.New("test").Parse(instance.Spec.CanaryAnalysis.Metric.PrometheusQuery)
+	if err != nil {
+		return "", err
+	}
+	err = tmpl.Execute(&query, instance)
+	if err != nil {
+		return "", err
+	}
+
+	return instance.Spec.CanaryAnalysis.MetricsServer + "/api/v1/query?query=" + query.String(), nil
 }
 
 // CreatePrimaryRelease creates a Service for Target,
@@ -408,7 +437,7 @@ func (r *ReconcileCanary) ProgressCanaryRelease(instance *kharonv1alpha1.Canary)
 
 	currentCanaryWeight.WithLabelValues(instance.Namespace, instance.Name, instance.Spec.TargetRef.Name).Set(float64(canaryWeight))
 
-	return r.ManageSuccess(instance, time.Duration(instance.Spec.CanaryAnalysis.Interval)*time.Second, "ProgressCanaryRelease")
+	return r.ManageSuccess(instance, time.Duration(instance.Spec.CanaryAnalysis.Metric.Interval)*time.Second, "ProgressCanaryRelease")
 }
 
 // EndCanaryRelease ends the canary because everything went fine... so canary becomes primary
@@ -894,4 +923,25 @@ func getSelectorFromTarget(target runtime.Object) map[string]string {
 	}
 
 	return map[string]string{}
+}
+
+func runMetricQuery(query string, result *map[string]interface{}) error {
+	resp, err := http.Get(query)
+	if err != nil {
+		return err
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(result); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func prettyPrint(v interface{}) (err error) {
+	b, err := json.MarshalIndent(v, "", "  ")
+	if err == nil {
+		fmt.Println(string(b))
+	}
+	return
 }

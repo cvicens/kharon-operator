@@ -9,9 +9,9 @@ spec:
   enabled: true
   type: Native
   canaryAnalysis:
-    metricsServer: 'https://prometheus...'
+    metricsServer: 'http://prometheus-operated-monitoring.apps.cluster-swedbank-e984.swedbank-e984.open.redhat.com'
     # schedule interval (default 60s)
-    interval: 20
+    interval: 60
     # max number of failed metric checks before rollback
     threshold: 5
     # max traffic percentage routed to canary
@@ -26,16 +26,16 @@ spec:
       # percentage (0-100)
       threshold: 99
       interval: 20
-      prometheusQuery: ''
+      prometheusQuery: 'rate(api_http_errors_total{namespace="{{.Namespace}}",service="{{.Spec.TargetRef.Name}}"}[5m])/rate(api_http_requests_total{namespace="{{.Namespace}}",service="{{.Spec.TargetRef.Name}}"}[5m])'
   targetRefContainerPort: '8080-tcp' # If you don't specify this... maybe the order of ports is not correct and you'll get another port...
-  targetRef:
-    apiVersion: apps.openshift.io/v1
-    kind: DeploymentConfig
-    name: kharon-test-v1-0-0
   #targetRef:
   #  apiVersion: apps.openshift.io/v1
   #  kind: DeploymentConfig
-  #  name: kharon-test-v1-1-0
+  #  name: kharon-test-v1-0-0
+  targetRef:
+    apiVersion: apps.openshift.io/v1
+    kind: DeploymentConfig
+    name: kharon-test-v1-1-0
   #targetRef:
   #  apiVersion: apps.openshift.io/v1
   #  kind: DeploymentConfig
