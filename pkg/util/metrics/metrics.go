@@ -22,7 +22,7 @@ type Data struct {
 	ResultType string   `json:"resultType"`
 }
 
-type Reponse struct {
+type Response struct {
 	Data   Data   `json:"data"`
 	Status string `json:"status"`
 }
