@@ -40,7 +40,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promauto"
 
 	// Util
-	_util "github.com/redhat/kharon-operator/pkg/util"
+
 	_metrics "github.com/redhat/kharon-operator/pkg/util/metrics"
 )
 
@@ -287,8 +287,6 @@ func (r *ReconcileCanary) Reconcile(request reconcile.Request) (reconcile.Result
 	// Canary is inititialized, target is fine... cotainer, port... all OK
 
 	// First we have to figure out what action to trigger
-
-	_util.NVL("sd", "ss")
 
 	// If there's no Primary
 	if len(instance.Status.ReleaseHistory) <= 0 {
