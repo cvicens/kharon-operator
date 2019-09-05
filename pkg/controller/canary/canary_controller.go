@@ -3,10 +3,8 @@ package canary
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"math"
-	"net/http"
 	"reflect"
 	"regexp"
 	"strings"
@@ -40,6 +38,10 @@ import (
 	// Custom metrics
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
+
+	// Util
+	_util "github.com/redhat/kharon-operator/pkg/util"
+	_metrics "github.com/redhat/kharon-operator/pkg/util/metrics"
 )
 
 // Operator Name
@@ -286,6 +288,8 @@ func (r *ReconcileCanary) Reconcile(request reconcile.Request) (reconcile.Result
 
 	// First we have to figure out what action to trigger
 
+	_util.NVL("sd", "ss")
+
 	// If there's no Primary
 	if len(instance.Status.ReleaseHistory) <= 0 {
 		// Then Primary is the TargetRef ==> Action: Create Primary Release (and leave)
@@ -300,16 +304,20 @@ func (r *ReconcileCanary) Reconcile(request reconcile.Request) (reconcile.Result
 			// Then TargetRef is a Canary (a Canary IS already running OR starting)
 
 			// If Canary metric is not met, increase failedCheck counter
-			var metricQueryResult map[string]interface{}
-			if metricQueryURL, err := mountMetricQueryURL(instance); err == nil {
-				if err := runMetricQuery(metricQueryURL, &metricQueryResult); err != nil {
+			var metricResponse _metrics.Response
+			if metricQueryURL, err := _metrics.MountMetricQueryURL(instance); err == nil {
+				if err := _metrics.RunMetricQuery(metricQueryURL, &metricResponse); err != nil {
 					log.Error(err, "Error when querying the metrics server")
 				}
-				log.Info(fmt.Sprintf(">>>>> metric: %s", prettyPrint(metricQueryResult)))
+				//_util.PrettyPrint(metricResponse)
 			} else {
 				log.Error(err, "Error when mounting the metrics URL")
 			}
-			log.Info(fmt.Sprintf(">>>>> metric: %s", metricQueryResult["value"]))
+			if metricValue, err := _metrics.ExtractValueFromMetricResult(&metricResponse); err == nil {
+				log.Info(fmt.Sprintf(">>>>> metricValue: %s", metricValue))
+			} else {
+				log.Error(err, "Error extracting metric value")
+			}
 
 			// If failedCheck threshold is met, rollback
 
@@ -923,25 +931,4 @@ func getSelectorFromTarget(target runtime.Object) map[string]string {
 	}
 
 	return map[string]string{}
-}
-
-func runMetricQuery(query string, result *map[string]interface{}) error {
-	resp, err := http.Get(query)
-	if err != nil {
-		return err
-	}
-
-	if err := json.NewDecoder(resp.Body).Decode(result); err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func prettyPrint(v interface{}) (err error) {
-	b, err := json.MarshalIndent(v, "", "  ")
-	if err == nil {
-		fmt.Println(string(b))
-	}
-	return
 }
