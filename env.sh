@@ -17,3 +17,4 @@ export GOROOT="/usr/local/Cellar/go/1.12.7/libexec"
 export QUAY_USERNAME=cvicensa
 export OPERATOR_VERSION=0.0.1
 
+export PROJECT_NAME=${OPERATOR_NAME}-tests

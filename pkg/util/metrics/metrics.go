@@ -3,12 +3,20 @@ package metrics
 import (
 	"bytes"
 	"encoding/json"
+	"math"
 	"net/http"
+	"strconv"
 	"text/template"
 
 	_errors "errors"
 
 	kharonv1alpha1 "github.com/redhat/kharon-operator/pkg/apis/kharon/v1alpha1"
+)
+
+const (
+	errorQueryingMetricsServer            = "Error when querying the metrics server"
+	errorExtractingValueFromMetricsResult = "Error extracting metric value"
+	errorMountingMetricsURL               = "Error when mounting the metrics URL"
 )
 
 type Metric struct {
@@ -73,4 +81,28 @@ func ExtractValueFromMetricResult(result *Response) (string, error) {
 	}
 
 	return "", _errors.New("Cannot extract Value from metric result")
+}
+
+func ExecuteMetricQuery(instance *kharonv1alpha1.Canary) (float64, error) {
+	if metricQueryURL, err := MountMetricQueryURL(instance); err == nil {
+		var metricResponse Response
+		if err := RunMetricQuery(metricQueryURL, &metricResponse); err == nil {
+			//_util.PrettyPrint(metricResponse)
+			if metricValue, err := ExtractValueFromMetricResult(&metricResponse); err == nil {
+				metricValueFloat := 0.0
+				if value, err := strconv.ParseFloat(metricValue, 64); err == nil {
+					if !math.IsNaN(value) {
+						metricValueFloat = value
+					}
+				}
+				return metricValueFloat, nil
+			} else {
+				return -1, err
+			}
+		} else {
+			return -1, err
+		}
+	} else {
+		return -1, err
+	}
 }

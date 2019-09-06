@@ -27,20 +27,20 @@ type Release struct {
 
 // Metric defines a metric towards we check if the canary is fine
 type Metric struct {
-	Name            string `json:"name"`
-	Threshold       int32  `json:"threshold"`
-	Interval        int32  `json:"interval"`
-	PrometheusQuery string `json:"prometheusQuery"`
+	Name            string  `json:"name"`
+	Threshold       float64 `json:"threshold"`
+	Interval        int32   `json:"interval"`
+	PrometheusQuery string  `json:"prometheusQuery"`
 }
 
 // CanaryAnalisys defines how to run analysis on a canary release
 type CanaryAnalysis struct {
-	MetricsServer string `json:"metricsServer"`
-	Interval      int32  `json:"interval"` // In seconds
-	Threshold     int32  `json:"threshold"`
-	MaxWeight     int32  `json:"maxWeight"`
-	StepWeight    int32  `json:"stepWeight"`
-	Metric        Metric `json:"metric"`
+	MetricsServer string  `json:"metricsServer"`
+	Interval      int32   `json:"interval"` // In seconds
+	Threshold     float32 `json:"threshold"`
+	MaxWeight     int32   `json:"maxWeight"`
+	StepWeight    int32   `json:"stepWeight"`
+	Metric        Metric  `json:"metric"`
 }
 
 // CanaryType defines the potential condition types
@@ -137,15 +137,16 @@ type ReconcileStatus struct {
 type CanaryStatus struct {
 	ReconcileStatus `json:",inline"`
 
-	IsCanaryRunning  bool              `json:"isCanaryRunning"`
-	CanaryWeight     int32             `json:"canaryWeight"`
-	FailedChecks     int64             `json:"failedChecks"`
-	Iterations       int64             `json:"iterations"`
-	LastAppliedSpec  time.Duration     `json:"lastAppliedSpec"`
-	LastPromotedSpec time.Duration     `json:"lastPromotedSpec"`
-	LastStepTime     metav1.Time       `json:"lastStepTime"`
-	Conditions       []CanaryCondition `json:"conditions,omitempty"`     // Used to wait => kubectl wait canary/podinfo --for=condition=promoted
-	ReleaseHistory   []Release         `json:"releaseHistory,omitempty"` // Fed by the carany release process
+	IsCanaryRunning   bool              `json:"isCanaryRunning"`
+	CanaryWeight      int32             `json:"canaryWeight"`
+	CanaryMetricValue float64           `json:"canaryMetricValue"`
+	FailedChecks      int64             `json:"failedChecks"`
+	Iterations        int64             `json:"iterations"`
+	LastAppliedSpec   time.Duration     `json:"lastAppliedSpec"`
+	LastPromotedSpec  time.Duration     `json:"lastPromotedSpec"`
+	LastStepTime      metav1.Time       `json:"lastStepTime"`
+	Conditions        []CanaryCondition `json:"conditions,omitempty"`     // Used to wait => kubectl wait canary/podinfo --for=condition=promoted
+	ReleaseHistory    []Release         `json:"releaseHistory,omitempty"` // Fed by the carany release process
 }
 
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object

@@ -42,6 +42,7 @@ spec:
   #  name: kharon-test-v1-2-0
 #status:
 #  canaryWeight: 0
+#  canaryMetricValue: 0.87
 #  failedChecks: 0
 #  iterations: 0
 #  lastAppliedSpec: "14788816656920327485"

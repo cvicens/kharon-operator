@@ -51,18 +51,21 @@ const operatorName = "KharonOperator"
 const controllerName = "canary_controller"
 
 const (
-	errorTargetRefEmpty              = "Not a proper Canary object because TargetRef is empty"
-	errorTargetRefContainerPortEmpty = "Not a proper Canary object because TargetRefContainerPort is empty"
-	errorTargetRefKind               = "Not a proper Canary object because TargetRef is not Deployment or DeploymentConfig"
-	errorServiceNameEmpty            = "Not a proper Canary object because ServiceName is empty"
-	errorCanaryAnalysisEmpty         = "Not a proper Canary object because CanaryAnalysis is empty"
-	errorTargetRefNotValid           = "Not a proper Canary object because TargetRef points to an invalid object"
-	errorNotACanaryObject            = "Not a Canary object"
-	errorCanaryObjectNotValid        = "Not a valid Canary object"
-	errorRouteNotFound               = "Route object was deleted or cannot be found"
-	errorUnexpected                  = "Unexpected error"
-	errorCanaryWeightNot100          = "Canary has not reached 100%"
-	warningCanaryAlreadyEnded        = "Canary already reached 100%"
+	errorTargetRefEmpty                   = "Not a proper Canary object because TargetRef is empty"
+	errorTargetRefContainerPortEmpty      = "Not a proper Canary object because TargetRefContainerPort is empty"
+	errorTargetRefKind                    = "Not a proper Canary object because TargetRef is not Deployment or DeploymentConfig"
+	errorServiceNameEmpty                 = "Not a proper Canary object because ServiceName is empty"
+	errorCanaryAnalysisEmpty              = "Not a proper Canary object because CanaryAnalysis is empty"
+	errorTargetRefNotValid                = "Not a proper Canary object because TargetRef points to an invalid object"
+	errorNotACanaryObject                 = "Not a Canary object"
+	errorCanaryObjectNotValid             = "Not a valid Canary object"
+	errorRouteNotFound                    = "Route object was deleted or cannot be found"
+	errorUnexpected                       = "Unexpected error"
+	errorCanaryWeightNot100               = "Canary has not reached 100%"
+	errorQueryingMetricsServer            = "Error when querying the metrics server"
+	errorExtractingValueFromMetricsResult = "Error extracting metric value"
+	errorMountingMetricsURL               = "Error when mounting the metrics URL"
+	warningCanaryAlreadyEnded             = "Canary already reached 100%"
 )
 
 var log = logf.Log.WithName("controller_canary")
@@ -302,19 +305,12 @@ func (r *ReconcileCanary) Reconcile(request reconcile.Request) (reconcile.Result
 			// Then TargetRef is a Canary (a Canary IS already running OR starting)
 
 			// If Canary metric is not met, increase failedCheck counter
-			var metricResponse _metrics.Response
-			if metricQueryURL, err := _metrics.MountMetricQueryURL(instance); err == nil {
-				if err := _metrics.RunMetricQuery(metricQueryURL, &metricResponse); err != nil {
-					log.Error(err, "Error when querying the metrics server")
+			if metricValue, err := _metrics.ExecuteMetricQuery(instance); err == nil {
+				log.Info(fmt.Sprintf(">>>>>>>> %s", metricValue))
+				instance.Status.CanaryMetricValue = metricValue
+				if metricValue < instance.Spec.CanaryAnalysis.Metric.Threshold {
+
 				}
-				//_util.PrettyPrint(metricResponse)
-			} else {
-				log.Error(err, "Error when mounting the metrics URL")
-			}
-			if metricValue, err := _metrics.ExtractValueFromMetricResult(&metricResponse); err == nil {
-				log.Info(fmt.Sprintf(">>>>> metricValue: %s", metricValue))
-			} else {
-				log.Error(err, "Error extracting metric value")
 			}
 
 			// If failedCheck threshold is met, rollback
