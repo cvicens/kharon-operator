@@ -44,6 +44,12 @@ var (
 )
 var log = logf.Log.WithName("cmd")
 
+const (
+	// Custom Metrics Port Name
+	customMetricsPortName       = "custom-metrics"
+	customMetricsPort     int32 = 8989
+)
+
 // Metrics... for now
 var (
 	opsProcessed = promauto.NewCounter(prometheus.CounterOpts{
@@ -135,6 +141,7 @@ func main() {
 	servicePorts := []v1.ServicePort{
 		{Port: metricsPort, Name: metrics.OperatorPortName, Protocol: v1.ProtocolTCP, TargetPort: intstr.IntOrString{Type: intstr.Int, IntVal: metricsPort}},
 		{Port: operatorMetricsPort, Name: metrics.CRPortName, Protocol: v1.ProtocolTCP, TargetPort: intstr.IntOrString{Type: intstr.Int, IntVal: operatorMetricsPort}},
+		{Port: customMetricsPort, Name: customMetricsPortName, Protocol: v1.ProtocolTCP, TargetPort: intstr.IntOrString{Type: intstr.Int, IntVal: customMetricsPort}},
 	}
 	// Create Service object to expose the metrics port(s).
 	_, err = metrics.CreateMetricsService(ctx, cfg, servicePorts)
@@ -144,9 +151,9 @@ func main() {
 
 	// Metrics... for now
 	go func() {
-		log.Info("Prometheus => serving on 2112")
-		http.Handle("/prometheus", promhttp.Handler())
-		if err := http.ListenAndServe(":2112", nil); err != nil {
+		log.Info(fmt.Sprintf("Prometheus => serving on %d", customMetricsPort))
+		http.Handle("/metrics", promhttp.Handler())
+		if err := http.ListenAndServe(fmt.Sprintf(":%d", customMetricsPort), nil); err != nil {
 			log.Error(err, "Prometheus => ListenAndServe exited non-zero")
 			os.Exit(1)
 		}

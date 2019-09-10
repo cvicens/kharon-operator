@@ -1,15 +1,15 @@
 apiVersion: kharon.redhat.com/v1alpha1
 kind: Canary
 metadata:
-  name: canary-1
+  name: kharon-test
   labels:
-    app: deployment-example
+    app: kharon-test
 spec:
-  serviceName: deployment-example
+  serviceName: kharon-test
   enabled: true
   type: Native
   canaryAnalysis:
-    metricsServer: 'http://prometheus-operated-monitoring.apps.cluster-swedbank-e984.swedbank-e984.open.redhat.com'
+    metricsServer: 'http://prometheus-operated-monitoring.apps.cluster-kharon-eeae.kharon-eeae.open.redhat.com'
     # schedule interval (default 60s)
     interval: 60
     # max number of failed metric checks before rollback
@@ -26,7 +26,9 @@ spec:
       # percentage (0-100)
       threshold: 99
       interval: 20
-      prometheusQuery: 'rate(api_http_errors_total{namespace="{{.Namespace}}",service="{{.Spec.TargetRef.Name}}"}[5m])/rate(api_http_requests_total{namespace="{{.Namespace}}",service="{{.Spec.TargetRef.Name}}"}[5m])'
+      #prometheusQuery: 'rate(api_http_errors_total{namespace="{{.Namespace}}",service="{{.Spec.TargetRef.Name}}"}[5m])/rate(api_http_requests_total{namespace="{{.Namespace}}",service="{{.Spec.TargetRef.Name}}"}[5m])'
+      prometheusQuery: '( sum(api_http_errors_total{namespace="{{.Namespace}}",service="{{.Spec.TargetRef.Name}}"}) /sum(api_http_requests_total{namespace="{{.Namespace}}",service="{{.Spec.TargetRef.Name}}"}) ) * 100.0'
+      
   targetRefContainerPort: '8080-tcp' # If you don't specify this... maybe the order of ports is not correct and you'll get another port...
   #targetRef:
   #  apiVersion: apps.openshift.io/v1

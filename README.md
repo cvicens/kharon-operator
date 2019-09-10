@@ -76,6 +76,7 @@ operator-sdk up local --namespace=${PROJECT_NAME}
 export QUAY_USERNAME=cvicensa
 export OPERATOR_VERSION=0.0.1
 operator-sdk build quay.io/${QUAY_USERNAME}/${OPERATOR_NAME}:v${OPERATOR_VERSION}
+docker push quay.io/${QUAY_USERNAME}/${OPERATOR_NAME}:v${OPERATOR_VERSION}
 ```
 
 ## Change operator.yaml

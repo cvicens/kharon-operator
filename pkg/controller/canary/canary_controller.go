@@ -40,7 +40,6 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promauto"
 
 	// Util
-
 	_metrics "github.com/redhat/kharon-operator/pkg/util/metrics"
 )
 
@@ -75,6 +74,15 @@ var (
 	currentCanaryWeight = promauto.NewGaugeVec(prometheus.GaugeOpts{
 		Name: "kharon_current_canary_weight",
 		Help: "Weight of the current canary release",
+	},
+		[]string{
+			"namespace",
+			"canary",
+			"target",
+		})
+	currentCanaryMetricValue = promauto.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "kharon_current_canary_metric_value",
+		Help: "Metric Value of the current canary release",
 	},
 		[]string{
 			"namespace",
@@ -307,10 +315,13 @@ func (r *ReconcileCanary) Reconcile(request reconcile.Request) (reconcile.Result
 			// If Canary metric is not met, increase failedCheck counter
 			if metricValue, err := _metrics.ExecuteMetricQuery(instance); err == nil {
 				log.Info(fmt.Sprintf(">>>>>>>> %s", metricValue))
+				currentCanaryMetricValue.WithLabelValues(instance.Namespace, instance.Name, instance.Spec.TargetRef.Name).Set(metricValue)
 				instance.Status.CanaryMetricValue = metricValue
 				if metricValue < instance.Spec.CanaryAnalysis.Metric.Threshold {
 
 				}
+			} else {
+				log.Error(err, fmt.Sprintf("Error %s", err))
 			}
 
 			// If failedCheck threshold is met, rollback

@@ -3,14 +3,19 @@ package metrics
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"math"
 	"net/http"
+	"net/url"
 	"strconv"
 	"text/template"
 
 	_errors "errors"
 
+	logf "sigs.k8s.io/controller-runtime/pkg/runtime/log"
+
 	kharonv1alpha1 "github.com/redhat/kharon-operator/pkg/apis/kharon/v1alpha1"
+	//_util "github.com/redhat/kharon-operator/pkg/util"
 )
 
 const (
@@ -18,6 +23,8 @@ const (
 	errorExtractingValueFromMetricsResult = "Error extracting metric value"
 	errorMountingMetricsURL               = "Error when mounting the metrics URL"
 )
+
+var log = logf.Log.WithName("canary_metrics")
 
 type Metric struct {
 	API              string `json:"api"`
@@ -70,7 +77,7 @@ func MountMetricQueryURL(instance *kharonv1alpha1.Canary) (string, error) {
 		return "", err
 	}
 
-	return instance.Spec.CanaryAnalysis.MetricsServer + "/api/v1/query?query=" + query.String(), nil
+	return instance.Spec.CanaryAnalysis.MetricsServer + "/api/v1/query?query=" + url.QueryEscape(query.String()), nil
 }
 
 func ExtractValueFromMetricResult(result *Response) (string, error) {
@@ -85,6 +92,7 @@ func ExtractValueFromMetricResult(result *Response) (string, error) {
 
 func ExecuteMetricQuery(instance *kharonv1alpha1.Canary) (float64, error) {
 	if metricQueryURL, err := MountMetricQueryURL(instance); err == nil {
+		log.Info(fmt.Sprintf("metricQueryURL: %s", metricQueryURL))
 		var metricResponse Response
 		if err := RunMetricQuery(metricQueryURL, &metricResponse); err == nil {
 			//_util.PrettyPrint(metricResponse)

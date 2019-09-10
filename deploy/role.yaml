@@ -58,3 +58,17 @@ rules:
   - '*'
   verbs:
   - '*'
+- apiGroups:
+  - apps.openshift.io
+  resources:
+  - 'deploymentconfigs'
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - route.openshift.io
+  resources:
+  - 'routes'
+  verbs:
+  - '*'

@@ -14,6 +14,7 @@ sleep 10
 for i in {0..2};
 do
     oc new-app kharon-operator-tests/kharon-test:v1.${i}.0 --name kharon-test-v1-${i}-0 -n ${PROJECT_NAME}
+    oc expose svc/kharon-test-v1-${i}-0 -n ${PROJECT_NAME}
     oc label svc/kharon-test-v1-${i}-0 team=spring-boot-actuator -n ${PROJECT_NAME}
 done
 
