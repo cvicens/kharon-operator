@@ -11,6 +11,18 @@ import (
 // EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
 // NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
 
+// ActionType defines the potential actions types
+type ActionType string
+
+const (
+	CreatePrimaryRelease  ActionType = "CreatePrimaryRelease"
+	ProgressCanaryRelease ActionType = "ProgressCanaryRelease"
+	EndCanaryRelease      ActionType = "EndCanaryRelease"
+	RollbackRelease       ActionType = "RollbackRelease"
+	RequeueEvent          ActionType = "RequeueEvent"
+	NoAction              ActionType = "NoAction"
+)
+
 // Ref defines a pointer to Deployment, DeploymentConfig, ...
 type Ref struct {
 	APIVersion string `json:"apiVersion"`
@@ -29,18 +41,19 @@ type Release struct {
 type Metric struct {
 	Name            string  `json:"name"`
 	Threshold       float64 `json:"threshold"`
+	Operator        string  `json:"operator"`
 	Interval        int32   `json:"interval"`
 	PrometheusQuery string  `json:"prometheusQuery"`
 }
 
 // CanaryAnalisys defines how to run analysis on a canary release
 type CanaryAnalysis struct {
-	MetricsServer string  `json:"metricsServer"`
-	Interval      int32   `json:"interval"` // In seconds
-	Threshold     float32 `json:"threshold"`
-	MaxWeight     int32   `json:"maxWeight"`
-	StepWeight    int32   `json:"stepWeight"`
-	Metric        Metric  `json:"metric"`
+	MetricsServer string `json:"metricsServer"`
+	Interval      int32  `json:"interval"` // In seconds
+	Threshold     int32  `json:"threshold"`
+	MaxWeight     int32  `json:"maxWeight"`
+	StepWeight    int32  `json:"stepWeight"`
+	Metric        Metric `json:"metric"`
 }
 
 // CanaryType defines the potential condition types
@@ -102,6 +115,7 @@ type CanaryConditionStatus string
 const (
 	CanaryConditionStatusTrue    CanaryConditionStatus = "True"
 	CanaryConditionStatusFalse   CanaryConditionStatus = "False"
+	CanaryConditionStatusFailure CanaryConditionStatus = "Failure"
 	CanaryConditionStatusUnknown CanaryConditionStatus = "Unknown"
 )
 
@@ -140,11 +154,12 @@ type CanaryStatus struct {
 	IsCanaryRunning   bool              `json:"isCanaryRunning"`
 	CanaryWeight      int32             `json:"canaryWeight"`
 	CanaryMetricValue float64           `json:"canaryMetricValue"`
-	FailedChecks      int64             `json:"failedChecks"`
-	Iterations        int64             `json:"iterations"`
+	FailedChecks      int32             `json:"failedChecks"`
+	Iterations        int32             `json:"iterations"`
 	LastAppliedSpec   time.Duration     `json:"lastAppliedSpec"`
 	LastPromotedSpec  time.Duration     `json:"lastPromotedSpec"`
 	LastStepTime      metav1.Time       `json:"lastStepTime"`
+	LastAction        ActionType        `json:"lastAction"`
 	Conditions        []CanaryCondition `json:"conditions,omitempty"`     // Used to wait => kubectl wait canary/podinfo --for=condition=promoted
 	ReleaseHistory    []Release         `json:"releaseHistory,omitempty"` // Fed by the carany release process
 }

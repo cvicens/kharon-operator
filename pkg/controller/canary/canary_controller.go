@@ -1,14 +1,12 @@
 package canary
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"math"
 	"reflect"
 	"regexp"
 	"strings"
-	"text/template"
 	"time"
 
 	kharonv1alpha1 "github.com/redhat/kharon-operator/pkg/apis/kharon/v1alpha1"
@@ -40,6 +38,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promauto"
 
 	// Util
+	_util "github.com/redhat/kharon-operator/pkg/util"
 	_metrics "github.com/redhat/kharon-operator/pkg/util/metrics"
 )
 
@@ -64,6 +63,9 @@ const (
 	errorQueryingMetricsServer            = "Error when querying the metrics server"
 	errorExtractingValueFromMetricsResult = "Error extracting metric value"
 	errorMountingMetricsURL               = "Error when mounting the metrics URL"
+	errorNoReleaseInHistoryToRollback     = "No release in history to rollback"
+	errorUnableToUpdateInstance           = "Unable to update instance"
+	errorRolledbackRelease                = "Realease was rolled back"
 	warningCanaryAlreadyEnded             = "Canary already reached 100%"
 )
 
@@ -118,11 +120,6 @@ type TargetRouteDef struct {
 	canaryService  *DestinationServiceDef
 }
 
-/**
-* USER ACTION REQUIRED: This is a scaffold file intended for the user to modify with their own Controller
-* business logic.  Delete these comments after modifying this file.*
- */
-
 // Add creates a new Canary Controller and adds it to the Manager. The Manager will set fields on the Controller
 // and Start it when the Manager is Started.
 func Add(mgr manager.Manager) error {
@@ -148,7 +145,6 @@ func add(mgr manager.Manager, r reconcile.Reconciler) error {
 
 	predicate := predicate.Funcs{
 		UpdateFunc: func(e event.UpdateEvent) bool {
-			log.Info("serviceConfigOk (predicate->UpdateFunc)")
 			// Check that new and old objects are the expected type
 			_, ok := e.ObjectOld.(*kharonv1alpha1.Canary)
 			if !ok {
@@ -285,7 +281,7 @@ func (r *ReconcileCanary) Reconcile(request reconcile.Request) (reconcile.Result
 	if initialized, err := r.IsInitialized(instance, target); err == nil && !initialized {
 		err := r.client.Update(context.TODO(), instance)
 		if err != nil {
-			log.Error(err, "unable to update instance", "instance", instance)
+			log.Error(err, errorUnableToUpdateInstance, "instance", instance)
 			return r.ManageError(instance, err)
 		}
 		return reconcile.Result{}, nil
@@ -295,6 +291,22 @@ func (r *ReconcileCanary) Reconcile(request reconcile.Request) (reconcile.Result
 		}
 	}
 
+	// If reentering from a canary rollback
+	if instance.Status.Status == kharonv1alpha1.CanaryConditionStatusFailure && instance.Status.Reason == errorRolledbackRelease {
+		// If target is already pointing to the previous release, we're fine
+		if instance.Spec.TargetRef == instance.Status.ReleaseHistory[len(instance.Status.ReleaseHistory)-1].Ref {
+			return r.ManageSuccess(instance, 0, kharonv1alpha1.NoAction)
+		}
+
+		// Else... we need to update TargetRef to point to the current release (hence rollback)
+		instance.Spec.TargetRef = instance.Status.ReleaseHistory[len(instance.Status.ReleaseHistory)-1].Ref
+		if err := r.client.Update(context.TODO(), instance); err != nil {
+			log.Error(err, errorUnableToUpdateInstance, "instance", instance)
+			return r.ManageError(instance, err)
+		}
+		return reconcile.Result{}, nil
+	}
+
 	// Canary is inititialized, target is fine... cotainer, port... all OK
 
 	// First we have to figure out what action to trigger
@@ -302,7 +314,6 @@ func (r *ReconcileCanary) Reconcile(request reconcile.Request) (reconcile.Result
 	// If there's no Primary
 	if len(instance.Status.ReleaseHistory) <= 0 {
 		// Then Primary is the TargetRef ==> Action: Create Primary Release (and leave)
-		log.Info("dispatch({type: 'CREATE_PRIMARY_RELEASE', index: 1})")
 		return r.CreatePrimaryRelease(instance)
 	} else {
 		// Else, there's Primary
@@ -314,59 +325,44 @@ func (r *ReconcileCanary) Reconcile(request reconcile.Request) (reconcile.Result
 
 			// If Canary metric is not met, increase failedCheck counter
 			if metricValue, err := _metrics.ExecuteMetricQuery(instance); err == nil {
-				log.Info(fmt.Sprintf(">>>>>>>> %s", metricValue))
 				currentCanaryMetricValue.WithLabelValues(instance.Namespace, instance.Name, instance.Spec.TargetRef.Name).Set(metricValue)
 				instance.Status.CanaryMetricValue = metricValue
-				if metricValue < instance.Spec.CanaryAnalysis.Metric.Threshold {
-
+				if !_metrics.ValidateMetricValue(metricValue, instance.Spec.CanaryAnalysis.Metric.Operator, instance.Spec.CanaryAnalysis.Metric.Threshold) {
+					instance.Status.FailedChecks++
 				}
+
 			} else {
 				log.Error(err, fmt.Sprintf("Error %s", err))
 			}
 
 			// If failedCheck threshold is met, rollback
+			if instance.Status.FailedChecks > instance.Spec.CanaryAnalysis.Threshold {
+				return r.RollbackRelease(instance)
+			}
 
 			// If it's been more than the interval beween Canary steps
 			timeSinceLastStep := time.Since(instance.Status.LastStepTime.Time)
-			log.Info(fmt.Sprintf("====> timeSinceLastStep %s", timeSinceLastStep))
 			if timeSinceLastStep > time.Duration(instance.Spec.CanaryAnalysis.Interval)*time.Second {
 				// If Progress is < 100 % ==> Action: Progress Canary Release
 				if instance.Status.CanaryWeight < 100 {
-					log.Info("dispatch({type: 'PROGRESS_CANARY_RELEASE', index: 1})")
 					return r.ProgressCanaryRelease(instance)
-				} else {
-					// Else ==> Action: End Canary Release ==> Action Create Primary Release From Canary
-					log.Info("dispatch({type: 'END_CANARY_RELEASE', index: 1})")
-					return r.EndCanaryRelease(instance)
 				}
+				// Else ==> Action: End Canary Release ==> Action Create Primary Release From Canary
+				return r.EndCanaryRelease(instance)
 			} else {
-				return r.ManageSuccess(instance, time.Duration(instance.Spec.CanaryAnalysis.Metric.Interval)*time.Second, "timeSinceLastStep <")
+				return r.ManageSuccess(instance, time.Duration(instance.Spec.CanaryAnalysis.Metric.Interval)*time.Second, kharonv1alpha1.RequeueEvent)
 			}
 		} else {
 			// If TargetRef is the same ==> Action: No Action ==> it means reset status to zero (so to speak) if it's not zero
-			log.Info("TODO dispatch({type: 'NO_ACTION', index: 1})")
-			//return r.ManageSuccess(instance, time.Duration(instance.Spec.CanaryAnalysis.Interval)*time.Second, "NO_ACTION")
-			return r.ManageSuccess(instance, 0, "NO_ACTION")
+			log.Info("ACTION {NO_ACTION}")
+			return r.ManageSuccess(instance, 0, kharonv1alpha1.NoAction)
 		}
 	}
 }
 
-func mountMetricQueryURL(instance *kharonv1alpha1.Canary) (string, error) {
-	var query bytes.Buffer
-	tmpl, err := template.New("test").Parse(instance.Spec.CanaryAnalysis.Metric.PrometheusQuery)
-	if err != nil {
-		return "", err
-	}
-	err = tmpl.Execute(&query, instance)
-	if err != nil {
-		return "", err
-	}
-
-	return instance.Spec.CanaryAnalysis.MetricsServer + "/api/v1/query?query=" + query.String(), nil
-}
-
-// CreatePrimaryRelease creates a Service for Target,
+// CreatePrimaryRelease creates new release, hence no canary is triggered
 func (r *ReconcileCanary) CreatePrimaryRelease(instance *kharonv1alpha1.Canary) (reconcile.Result, error) {
+	log.Info("ACTION {CREATE_PRIMARY_RELEASE}")
 	// Create a Service for TargetRef
 	targetService, err := r.CreateServiceForTargetRef(instance)
 	if err != nil && !errors.IsAlreadyExists(err) {
@@ -379,9 +375,9 @@ func (r *ReconcileCanary) CreatePrimaryRelease(instance *kharonv1alpha1.Canary) 
 		Weight: 100,
 	}
 	canaryService := &DestinationServiceDef{}
-	if _, err := r.CreateRouteForCanary(instance, primaryService, canaryService); err != nil {
+	if route, err := r.CreateRouteForCanary(instance, primaryService, canaryService); err != nil {
 		if errors.IsAlreadyExists(err) {
-			if _, err := r.UpdateRouteDestinationsForCanary(instance, primaryService, canaryService); err != nil {
+			if _, err := r.UpdateRouteDestinationsForCanary(route, primaryService, canaryService); err != nil {
 				return r.ManageError(instance, err)
 			}
 		}
@@ -397,11 +393,57 @@ func (r *ReconcileCanary) CreatePrimaryRelease(instance *kharonv1alpha1.Canary) 
 		Ref:  instance.Spec.TargetRef,
 	})
 
-	return r.ManageSuccess(instance, time.Duration(instance.Spec.CanaryAnalysis.Interval)*time.Second, "CreatePrimaryRelease")
+	return r.ManageSuccess(instance, time.Duration(instance.Spec.CanaryAnalysis.Interval)*time.Second, kharonv1alpha1.CreatePrimaryRelease)
+}
+
+// RollbackRelease goes back to the previous release in the release history
+func (r *ReconcileCanary) RollbackRelease(instance *kharonv1alpha1.Canary) (reconcile.Result, error) {
+	log.Info("ACTION {ROLLBACK_RELEASE}")
+	if len(instance.Status.ReleaseHistory) <= 0 {
+		return r.ManageError(instance, _util.NewError(errorNoReleaseInHistoryToRollback))
+	}
+
+	// Fetch route
+	route, err := r.FetchRoute(instance)
+	if err != nil {
+		log.Error(err, errorRouteNotFound)
+		return r.ManageError(instance, err)
+	}
+
+	// Route should point to current release (latest in history) with 100% Weight
+	primaryService := &DestinationServiceDef{
+		Name:   instance.Status.ReleaseHistory[len(instance.Status.ReleaseHistory)-1].Name,
+		Weight: 100,
+	}
+	canaryService := &DestinationServiceDef{}
+	if _, err := r.UpdateRouteDestinationsForCanary(route, primaryService, canaryService); err != nil {
+		return r.ManageError(instance, err)
+	}
+
+	// Update Status with new Release!
+	instance.Status.IsCanaryRunning = false
+	instance.Status.CanaryWeight = 0
+	instance.Status.Iterations = 0
+	instance.Status.FailedChecks = 0
+	instance.Status.CanaryMetricValue = 0
+
+	return r.ManageError(instance, _util.NewError(errorRolledbackRelease))
+}
+
+// FetchRoute get the route related to the canary object
+func (r *ReconcileCanary) FetchRoute(instance *kharonv1alpha1.Canary) (*routev1.Route, error) {
+	route := &routev1.Route{}
+	err := r.client.Get(context.TODO(), types.NamespacedName{Name: instance.Spec.ServiceName, Namespace: instance.Namespace}, route)
+	if err != nil {
+		return nil, err
+	}
+
+	return route, nil
 }
 
 // ProgressCanaryRelease progresses the canary by updating its weight
 func (r *ReconcileCanary) ProgressCanaryRelease(instance *kharonv1alpha1.Canary) (reconcile.Result, error) {
+	log.Info("ACTION {PROGRESS_CANARY_RELEASE}")
 	// If Canary Weight is already >= 100, then we produce a warning
 	if instance.Status.CanaryWeight >= 100 {
 		err := errors.NewBadRequest(warningCanaryAlreadyEnded)
@@ -417,15 +459,9 @@ func (r *ReconcileCanary) ProgressCanaryRelease(instance *kharonv1alpha1.Canary)
 	}
 
 	// Fetch route
-	route := &routev1.Route{}
-	err := r.client.Get(context.TODO(), types.NamespacedName{Name: instance.Spec.ServiceName, Namespace: instance.Namespace}, route)
+	route, err := r.FetchRoute(instance)
 	if err != nil {
-		if errors.IsNotFound(err) {
-			err := errors.NewBadRequest(errorRouteNotFound)
-			log.Error(err, errorRouteNotFound)
-			return r.ManageError(instance, err)
-		}
-		log.Error(err, errorUnexpected)
+		log.Error(err, errorRouteNotFound)
 		return r.ManageError(instance, err)
 	}
 
@@ -438,7 +474,7 @@ func (r *ReconcileCanary) ProgressCanaryRelease(instance *kharonv1alpha1.Canary)
 		Name:   instance.Spec.TargetRef.Name,
 		Weight: instance.Status.CanaryWeight,
 	}
-	if _, err := r.UpdateRouteDestinationsForCanary(instance, primaryService, canaryService); err != nil {
+	if _, err := r.UpdateRouteDestinationsForCanary(route, primaryService, canaryService); err != nil {
 		return r.ManageError(instance, err)
 	}
 
@@ -450,12 +486,12 @@ func (r *ReconcileCanary) ProgressCanaryRelease(instance *kharonv1alpha1.Canary)
 
 	currentCanaryWeight.WithLabelValues(instance.Namespace, instance.Name, instance.Spec.TargetRef.Name).Set(float64(canaryWeight))
 
-	return r.ManageSuccess(instance, time.Duration(instance.Spec.CanaryAnalysis.Metric.Interval)*time.Second, "ProgressCanaryRelease")
+	return r.ManageSuccess(instance, time.Duration(instance.Spec.CanaryAnalysis.Metric.Interval)*time.Second, kharonv1alpha1.ProgressCanaryRelease)
 }
 
 // EndCanaryRelease ends the canary because everything went fine... so canary becomes primary
 func (r *ReconcileCanary) EndCanaryRelease(instance *kharonv1alpha1.Canary) (reconcile.Result, error) {
-	log.Info("EndCanaryRelease ==>")
+	log.Info("ACTION {END_CANARY_RELEASE}")
 	// If Canary Weight is already < 100, then we produce a warning
 	if instance.Status.CanaryWeight < 100 {
 		err := errors.NewBadRequest(errorCanaryWeightNot100)
@@ -464,15 +500,9 @@ func (r *ReconcileCanary) EndCanaryRelease(instance *kharonv1alpha1.Canary) (rec
 	}
 
 	// Fetch route
-	route := &routev1.Route{}
-	err := r.client.Get(context.TODO(), types.NamespacedName{Name: instance.Spec.ServiceName, Namespace: instance.Namespace}, route)
+	route, err := r.FetchRoute(instance)
 	if err != nil {
-		if errors.IsNotFound(err) {
-			err := errors.NewBadRequest(errorRouteNotFound)
-			log.Error(err, errorRouteNotFound)
-			return r.ManageError(instance, err)
-		}
-		log.Error(err, errorUnexpected)
+		log.Error(err, errorRouteNotFound)
 		return r.ManageError(instance, err)
 	}
 
@@ -482,13 +512,15 @@ func (r *ReconcileCanary) EndCanaryRelease(instance *kharonv1alpha1.Canary) (rec
 		Weight: 100,
 	}
 	canaryService := &DestinationServiceDef{}
-	if _, err := r.UpdateRouteDestinationsForCanary(instance, primaryService, canaryService); err != nil {
+	if _, err := r.UpdateRouteDestinationsForCanary(route, primaryService, canaryService); err != nil {
 		return r.ManageError(instance, err)
 	}
 
 	// Update Status with new primary
 	instance.Status.IsCanaryRunning = false
 	instance.Status.CanaryWeight = 0
+	instance.Status.CanaryMetricValue = 0
+	instance.Status.FailedChecks = 0
 	instance.Status.ReleaseHistory = append(instance.Status.ReleaseHistory, kharonv1alpha1.Release{
 		ID:   instance.Spec.TargetRef.Name,
 		Name: instance.Spec.TargetRef.Name,
@@ -497,7 +529,7 @@ func (r *ReconcileCanary) EndCanaryRelease(instance *kharonv1alpha1.Canary) (rec
 	instance.Status.Iterations++
 	instance.Status.LastStepTime = metav1.Time{}
 
-	return r.ManageSuccess(instance, time.Duration(instance.Spec.CanaryAnalysis.Interval)*time.Second, "EndCanaryRelease")
+	return r.ManageSuccess(instance, time.Duration(instance.Spec.CanaryAnalysis.Interval)*time.Second, kharonv1alpha1.EndCanaryRelease)
 }
 
 // CreateServiceForTargetRef creates a Service for Target
@@ -580,24 +612,21 @@ func (r *ReconcileCanary) CreateRouteForCanary(instance *kharonv1alpha1.Canary,
 }
 
 // UpdateRouteDestinationsForCanary updates a Route with new destinations
-func (r *ReconcileCanary) UpdateRouteDestinationsForCanary(instance *kharonv1alpha1.Canary,
+func (r *ReconcileCanary) UpdateRouteDestinationsForCanary(
+	route *routev1.Route,
 	primaryService *DestinationServiceDef,
 	canaryService *DestinationServiceDef) (*routev1.Route, error) {
-	// We have to check if there is a Route called canary.Spec.ServiceName, otherwise create it
-	targetRoute := &routev1.Route{}
-	err := r.client.Get(context.TODO(), types.NamespacedName{Name: instance.Spec.ServiceName, Namespace: instance.Namespace}, targetRoute)
-	if err == nil {
-		// Let's update the route
-		updateRouteDestinations(targetRoute, primaryService, canaryService)
-		if err := r.client.Update(context.TODO(), targetRoute); err != nil {
-			return nil, err
-		}
-
-		// No errors, so return created Route
-		return targetRoute, nil
+	if route == nil {
+		return nil, _util.NewError("No route to be updated")
 	}
 
-	return nil, err
+	// Let's update the route
+	updateRouteDestinations(route, primaryService, canaryService)
+	if err := r.client.Update(context.TODO(), route); err != nil {
+		return nil, err
+	}
+
+	return route, nil
 }
 
 // IsValid checks if our CR is valid or not
@@ -651,6 +680,7 @@ func (r *ReconcileCanary) IsValid(obj metav1.Object) (bool, error) {
 
 // ManageError manages an error object, an instance of the CR is passed along
 func (r *ReconcileCanary) ManageError(obj metav1.Object, issue error) (reconcile.Result, error) {
+	log.Error(issue, "Error managed")
 	runtimeObj, ok := (obj).(runtime.Object)
 	if !ok {
 		log.Error(errors.NewBadRequest("not a runtime.Object"), "passed object was not a runtime.Object", "object", obj)
@@ -664,7 +694,7 @@ func (r *ReconcileCanary) ManageError(obj metav1.Object, issue error) (reconcile
 		status := kharonv1alpha1.ReconcileStatus{
 			LastUpdate: metav1.Now(),
 			Reason:     issue.Error(),
-			Status:     "Failure",
+			Status:     kharonv1alpha1.CanaryConditionStatusFailure,
 		}
 		canary.Status.ReconcileStatus = status
 		err := r.client.Status().Update(context.Background(), runtimeObj)
@@ -691,8 +721,8 @@ func (r *ReconcileCanary) ManageError(obj metav1.Object, issue error) (reconcile
 }
 
 // ManageSuccess manages a success and updates status accordingly, an instance of the CR is passed along
-func (r *ReconcileCanary) ManageSuccess(obj metav1.Object, requeueAfter time.Duration, from string) (reconcile.Result, error) {
-	log.Info(fmt.Sprintf("===> ManageSuccess with requeueAfter: %d from: %s", requeueAfter, from))
+func (r *ReconcileCanary) ManageSuccess(obj metav1.Object, requeueAfter time.Duration, action kharonv1alpha1.ActionType) (reconcile.Result, error) {
+	log.Info(fmt.Sprintf("===> ManageSuccess with requeueAfter: %d from: %s", requeueAfter, action))
 	runtimeObj, ok := (obj).(runtime.Object)
 	if !ok {
 		log.Error(errors.NewBadRequest("not a runtime.Object"), "passed object was not a runtime.Object", "object", obj)
@@ -705,6 +735,7 @@ func (r *ReconcileCanary) ManageSuccess(obj metav1.Object, requeueAfter time.Dur
 			Status:     kharonv1alpha1.CanaryConditionStatusTrue,
 		}
 		canary.Status.ReconcileStatus = status
+		canary.Status.LastAction = action
 
 		err := r.client.Status().Update(context.Background(), runtimeObj)
 		if err != nil {

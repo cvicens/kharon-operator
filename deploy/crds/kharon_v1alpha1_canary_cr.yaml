@@ -1,7 +1,7 @@
 apiVersion: kharon.redhat.com/v1alpha1
 kind: Canary
 metadata:
-  name: kharon-test
+  name: canary-kharon-test
   labels:
     app: kharon-test
 spec:
@@ -13,7 +13,7 @@ spec:
     # schedule interval (default 60s)
     interval: 60
     # max number of failed metric checks before rollback
-    threshold: 5
+    threshold: 3
     # max traffic percentage routed to canary
     # percentage (0-100)
     maxWeight: 50
@@ -21,13 +21,14 @@ spec:
     # percentage (0-100)
     stepWeight: 10
     metric:
-      name: request-success-rate
-      # minimum req success rate (non 5xx responses)
+      name: error-rate
+      # max error rate (5xx responses)
       # percentage (0-100)
-      threshold: 99
-      interval: 20
+      threshold: 2
+      operator: 'lt'
+      interval: 10
       #prometheusQuery: 'rate(api_http_errors_total{namespace="{{.Namespace}}",service="{{.Spec.TargetRef.Name}}"}[5m])/rate(api_http_requests_total{namespace="{{.Namespace}}",service="{{.Spec.TargetRef.Name}}"}[5m])'
-      prometheusQuery: '( sum(api_http_errors_total{namespace="{{.Namespace}}",service="{{.Spec.TargetRef.Name}}"}) /sum(api_http_requests_total{namespace="{{.Namespace}}",service="{{.Spec.TargetRef.Name}}"}) ) * 100.0'
+      prometheusQuery: '(sum(api_http_errors_total{namespace="{{.Namespace}}",service="{{.Spec.TargetRef.Name}}"})/sum(api_http_requests_total{namespace="{{.Namespace}}",service="{{.Spec.TargetRef.Name}}"}))*100.0'
       
   targetRefContainerPort: '8080-tcp' # If you don't specify this... maybe the order of ports is not correct and you'll get another port...
   #targetRef:

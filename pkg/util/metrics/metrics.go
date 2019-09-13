@@ -3,7 +3,6 @@ package metrics
 import (
 	"bytes"
 	"encoding/json"
-	"fmt"
 	"math"
 	"net/http"
 	"net/url"
@@ -92,7 +91,6 @@ func ExtractValueFromMetricResult(result *Response) (string, error) {
 
 func ExecuteMetricQuery(instance *kharonv1alpha1.Canary) (float64, error) {
 	if metricQueryURL, err := MountMetricQueryURL(instance); err == nil {
-		log.Info(fmt.Sprintf("metricQueryURL: %s", metricQueryURL))
 		var metricResponse Response
 		if err := RunMetricQuery(metricQueryURL, &metricResponse); err == nil {
 			//_util.PrettyPrint(metricResponse)
@@ -113,4 +111,38 @@ func ExecuteMetricQuery(instance *kharonv1alpha1.Canary) (float64, error) {
 	} else {
 		return -1, err
 	}
+}
+
+func ValidateMetricValue(metricValue float64, operator string, threshold float64) bool {
+	switch operator {
+	case "gt":
+		{
+			if !(metricValue > threshold) {
+				return false
+			}
+		}
+	case "ge":
+		{
+			if !(metricValue >= threshold) {
+				return false
+			}
+		}
+	case "lt":
+		{
+			if !(metricValue < threshold) {
+				return false
+			}
+		}
+	case "le":
+		{
+			if !(metricValue <= threshold) {
+				return false
+			}
+		}
+	default:
+		{
+			return false
+		}
+	}
+	return true
 }
