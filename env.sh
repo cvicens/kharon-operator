@@ -4,7 +4,7 @@
 export PATH=~/Projects/openshift/operators/bin:$PATH
 
 # SDK VERSION
-export RELEASE_VERSION=v0.9.0
+export RELEASE_VERSION=v0.10.0
 
 # API VERSION AND OPERATOR NAME
 export API_VERSION="kharon.redhat.com/v1alpha1"
