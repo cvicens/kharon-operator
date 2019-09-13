@@ -65,6 +65,7 @@ const (
 	errorMountingMetricsURL               = "Error when mounting the metrics URL"
 	errorNoReleaseInHistoryToRollback     = "No release in history to rollback"
 	errorUnableToUpdateInstance           = "Unable to update instance"
+	errorUnableToUpdateStatus             = "Unable to update status"
 	errorRolledbackRelease                = "Realease was rolled back"
 	warningCanaryAlreadyEnded             = "Canary already reached 100%"
 )
@@ -299,11 +300,14 @@ func (r *ReconcileCanary) Reconcile(request reconcile.Request) (reconcile.Result
 		}
 
 		// Else... we need to update TargetRef to point to the current release (hence rollback)
+		fromTarget := instance.Spec.TargetRef
 		instance.Spec.TargetRef = instance.Status.ReleaseHistory[len(instance.Status.ReleaseHistory)-1].Ref
 		if err := r.client.Update(context.TODO(), instance); err != nil {
 			log.Error(err, errorUnableToUpdateInstance, "instance", instance)
 			return r.ManageError(instance, err)
 		}
+		// Send notification event
+		r.recorder.Eventf(instance, "Normal", "CanaryRollback", "Instance %s was rollback from %s to %s", instance.ObjectMeta.Name, fromTarget.Name, instance.Spec.TargetRef.Name)
 		return reconcile.Result{}, nil
 	}
 
@@ -393,6 +397,9 @@ func (r *ReconcileCanary) CreatePrimaryRelease(instance *kharonv1alpha1.Canary) 
 		Ref:  instance.Spec.TargetRef,
 	})
 
+	// Send notification event
+	r.recorder.Eventf(instance, "Normal", string(kharonv1alpha1.CreatePrimaryRelease), "Primary release deployed from %s", instance.Spec.TargetRef.Name)
+
 	return r.ManageSuccess(instance, time.Duration(instance.Spec.CanaryAnalysis.Interval)*time.Second, kharonv1alpha1.CreatePrimaryRelease)
 }
 
@@ -426,6 +433,9 @@ func (r *ReconcileCanary) RollbackRelease(instance *kharonv1alpha1.Canary) (reco
 	instance.Status.Iterations = 0
 	instance.Status.FailedChecks = 0
 	instance.Status.CanaryMetricValue = 0
+
+	// Send notification event
+	r.recorder.Eventf(instance, "Warning", string(kharonv1alpha1.RollbackRelease), "Canary release rollback triggered for %s", instance.ObjectMeta.Name)
 
 	return r.ManageError(instance, _util.NewError(errorRolledbackRelease))
 }
@@ -486,6 +496,9 @@ func (r *ReconcileCanary) ProgressCanaryRelease(instance *kharonv1alpha1.Canary)
 
 	currentCanaryWeight.WithLabelValues(instance.Namespace, instance.Name, instance.Spec.TargetRef.Name).Set(float64(canaryWeight))
 
+	// Send notification event
+	r.recorder.Eventf(instance, "Normal", string(kharonv1alpha1.ProgressCanaryRelease), "Canary release %s progressed deployment %s to %d%%", instance.ObjectMeta.Name, instance.Spec.TargetRef.Name, canaryWeight)
+
 	return r.ManageSuccess(instance, time.Duration(instance.Spec.CanaryAnalysis.Metric.Interval)*time.Second, kharonv1alpha1.ProgressCanaryRelease)
 }
 
@@ -528,6 +541,9 @@ func (r *ReconcileCanary) EndCanaryRelease(instance *kharonv1alpha1.Canary) (rec
 	})
 	instance.Status.Iterations++
 	instance.Status.LastStepTime = metav1.Time{}
+
+	// Send notification event
+	r.recorder.Eventf(instance, "Normal", string(kharonv1alpha1.EndCanaryRelease), "Canary release %s ended deployment %s with success", instance.ObjectMeta.Name, instance.Spec.TargetRef.Name)
 
 	return r.ManageSuccess(instance, time.Duration(instance.Spec.CanaryAnalysis.Interval)*time.Second, kharonv1alpha1.EndCanaryRelease)
 }
@@ -699,7 +715,7 @@ func (r *ReconcileCanary) ManageError(obj metav1.Object, issue error) (reconcile
 		canary.Status.ReconcileStatus = status
 		err := r.client.Status().Update(context.Background(), runtimeObj)
 		if err != nil {
-			log.Error(err, "unable to update status")
+			log.Error(err, errorUnableToUpdateStatus)
 			return reconcile.Result{
 				RequeueAfter: time.Second,
 				Requeue:      true,
@@ -746,9 +762,9 @@ func (r *ReconcileCanary) ManageSuccess(obj metav1.Object, requeueAfter time.Dur
 				Requeue:      true,
 			}, nil
 		}
-		if canary.Status.IsCanaryRunning {
-			r.recorder.Event(runtimeObj, "Normal", "StatusUpdate", fmt.Sprintf("Canary in progress %d%%", canary.Status.CanaryWeight))
-		}
+		//if canary.Status.IsCanaryRunning {
+		//	r.recorder.Event(runtimeObj, "Normal", "StatusUpdate", fmt.Sprintf("Canary in progress %d%%", canary.Status.CanaryWeight))
+		//}
 	} else {
 		log.Info("object is not Canary, not setting status")
 		r.recorder.Event(runtimeObj, "Warning", "ProcessingError", "Object is not Canary, not setting status")
