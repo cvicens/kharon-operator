@@ -12,9 +12,10 @@ export OPERATOR_NAME="kharon-operator"
 
 # GO
 export GO111MODULE=on
-export GOROOT="/usr/local/Cellar/go/1.12.7/libexec"
 
-export QUAY_USERNAME=cvicensa
+# Operator
 export OPERATOR_VERSION=0.0.1
-
 export PROJECT_NAME=${OPERATOR_NAME}-tests
+
+# Quay
+export QUAY_USERNAME=cvicensa
