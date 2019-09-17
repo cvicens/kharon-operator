@@ -307,7 +307,7 @@ func (r *ReconcileCanary) Reconcile(request reconcile.Request) (reconcile.Result
 			return r.ManageError(instance, err)
 		}
 		// Send notification event
-		r.recorder.Eventf(instance, "Normal", "CanaryRollback", "Instance %s was rollback from %s to %s", instance.ObjectMeta.Name, fromTarget.Name, instance.Spec.TargetRef.Name)
+		r.recorder.Eventf(instance, "Normal", string(kharonv1alpha1.RollbackReleaseEnd), "Instance %s was rollback from %s to %s", instance.ObjectMeta.Name, fromTarget.Name, instance.Spec.TargetRef.Name)
 		return reconcile.Result{}, nil
 	}
 
@@ -435,7 +435,7 @@ func (r *ReconcileCanary) RollbackRelease(instance *kharonv1alpha1.Canary) (reco
 	instance.Status.CanaryMetricValue = 0
 
 	// Send notification event
-	r.recorder.Eventf(instance, "Warning", string(kharonv1alpha1.RollbackRelease), "Canary release rollback triggered for %s", instance.ObjectMeta.Name)
+	r.recorder.Eventf(instance, "Warning", string(kharonv1alpha1.RollbackReleaseStart), "Canary release rollback triggered for %s", instance.ObjectMeta.Name)
 
 	return r.ManageError(instance, _util.NewError(errorRolledbackRelease))
 }
