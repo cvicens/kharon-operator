@@ -18,7 +18,8 @@ const (
 	CreatePrimaryRelease  ActionType = "CreatePrimaryRelease"
 	ProgressCanaryRelease ActionType = "ProgressCanaryRelease"
 	EndCanaryRelease      ActionType = "EndCanaryRelease"
-	RollbackRelease       ActionType = "RollbackRelease"
+	RollbackReleaseStart  ActionType = "RollbackReleaseStart"
+	RollbackReleaseEnd    ActionType = "RollbackReleaseEnd"
 	RequeueEvent          ActionType = "RequeueEvent"
 	NoAction              ActionType = "NoAction"
 )
