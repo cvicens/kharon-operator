@@ -1,0 +1,49 @@
+dist: xenial
+sudo: required
+
+language: go
+go:
+- "1.12.x"
+
+go_import_path: github.com/redhat/kharon-operator
+
+env:
+  - GO111MODULE=on
+  - OPERATOR_SDK_VERSION=v0.10.0
+
+cache:
+  directories:
+  - $GOCACHE
+  - $GOPATH/pkg/mod
+
+services:
+- docker
+
+before_install:
+  - export PATH=$PATH:$HOME/.local/bin
+
+install:
+  # setup operator-sdk
+  - sudo curl -L https://github.com/operator-framework/operator-sdk/releases/download/${OPERATOR_SDK_VERSION}/operator-sdk-v0.10.0-x86_64-linux-gnu -o /usr/local/bin/operator-sdk
+  - sudo chmod +x /usr/local/bin/operator-sdk
+
+jobs:
+  include:
+    - stage: deploy
+      script:
+        - ./build-operator.sh
+        - echo "TRAVIS_TAG=${TRAVIS_TAG}"
+        - echo "$DOCKER_PASSWORD" | docker login -u "$DOCKER_USERNAME" --password-stdin
+        - ./push-operator.sh
+
+    - stage: deploy-release
+      script:
+        - ./build-operator.sh
+        - echo "TRAVIS_TAG=${TRAVIS_TAG}"
+        - echo "$DOCKER_PASSWORD" | docker login -u "$DOCKER_USERNAME" --password-stdin
+        - ./push-operator.sh
+stages:
+  - name: deploy
+    if: (tag IS blank) AND (branch = master) AND (type = push)
+  - name: deploy-release
+    if: (tag IS present) AND (type = push)
