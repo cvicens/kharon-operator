@@ -16,7 +16,7 @@ spec:
       containers:
         - name: kharon-operator
           # Replace this with the built image name
-          image: quay.io/cvicensa/kharon-operator:v0.0.1
+          image: quay.io/{{QUAY_USERNAME}}/kharon-operator:v{{OPERATOR_VERSION}}
           command:
           - kharon-operator
           imagePullPolicy: Always
