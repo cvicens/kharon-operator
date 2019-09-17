@@ -10,4 +10,4 @@ oc apply -f ./deploy/crds/kharon_v1alpha1_canary_crd.yaml -n ${PROJECT_NAME}
 
 cat ./deploy/operator.yaml | \
   sed -E "s/{{\b*QUAY_USERNAME\b*}}/${QUAY_USERNAME}/" | \
-  sed -E "s/{{\b*OPERATOR_VERSION\b*}}/${OPERATOR_VERSION}/" | oc apply -f -n ${PROJECT_NAME} -
+  sed -E "s/{{\b*OPERATOR_VERSION\b*}}/${OPERATOR_VERSION}/" | oc apply -n ${PROJECT_NAME} -f -
