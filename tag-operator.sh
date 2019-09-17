@@ -4,6 +4,6 @@
 
 git commit -a
 
-git tag -a v${OPERATOR_VERSION} -m "Releasing version v${OPERATOR_VERSION}"
+git tag -a ${OPERATOR_VERSION} -m "Releasing version ${OPERATOR_VERSION}"
 
-git push origin v${OPERATOR_VERSION} ; git push kharon v${OPERATOR_VERSION}
+git push origin ${OPERATOR_VERSION} ; git push kharon ${OPERATOR_VERSION}

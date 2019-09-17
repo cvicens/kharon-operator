@@ -14,7 +14,7 @@ export OPERATOR_NAME="kharon-operator"
 export GO111MODULE=on
 
 # Operator
-export OPERATOR_VERSION=0.0.4
+export OPERATOR_VERSION=v0.0.5
 export PROJECT_NAME=${OPERATOR_NAME}-tests
 
 # Quay

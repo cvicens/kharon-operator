@@ -75,21 +75,21 @@ operator-sdk up local --namespace=${PROJECT_NAME}
 ```
 export QUAY_USERNAME=cvicensa
 export OPERATOR_VERSION=0.0.1
-operator-sdk build quay.io/${QUAY_USERNAME}/${OPERATOR_NAME}:v${OPERATOR_VERSION}
-docker push quay.io/${QUAY_USERNAME}/${OPERATOR_NAME}:v${OPERATOR_VERSION}
+operator-sdk build quay.io/${QUAY_USERNAME}/${OPERATOR_NAME}:${OPERATOR_VERSION}
+docker push quay.io/${QUAY_USERNAME}/${OPERATOR_NAME}:${OPERATOR_VERSION}
 ```
 
 ## Change operator.yaml
 
 ```
-//cat deploy/operator.yaml | sed "s|REPLACE_IMAGE|quay.io/${QUAY_USERNAME}/${OPERATOR_NAME}:v${OPERATOR_VERSION}|g" > deploy/operator-v${OPERATOR_VERSION}.yaml
-sed -i "" "s|REPLACE_IMAGE|quay.io/${QUAY_USERNAME}/${OPERATOR_NAME}:v${OPERATOR_VERSION}|g" deploy/operator.yaml
+//cat deploy/operator.yaml | sed "s|REPLACE_IMAGE|quay.io/${QUAY_USERNAME}/${OPERATOR_NAME}:${OPERATOR_VERSION}|g" > deploy/operator-${OPERATOR_VERSION}.yaml
+sed -i "" "s|REPLACE_IMAGE|quay.io/${QUAY_USERNAME}/${OPERATOR_NAME}:${OPERATOR_VERSION}|g" deploy/operator.yaml
 ```
 
 ## Push image
 
 ```
-docker push quay.io/${QUAY_USERNAME}/${OPERATOR_NAME}:v${OPERATOR_VERSION}
+docker push quay.io/${QUAY_USERNAME}/${OPERATOR_NAME}:${OPERATOR_VERSION}
 ```
 
 ## Deploy the operator manually
@@ -124,9 +124,9 @@ metadata:
 EOF
 
 ### Create a CSV
-sed -e "s|REPLACE_NAMESPACE|${PROJECT_NAME}|g" deploy/olm-catalog/${OPERATOR_NAME}/${OPERATOR_VERSION}/${OPERATOR_NAME}.v${OPERATOR_VERSION}.clusterserviceversion.yaml > deploy/olm-catalog/${OPERATOR_NAME}/${OPERATOR_VERSION}/${OPERATOR_NAME}.v${OPERATOR_VERSION}.clusterserviceversion-${PROJECT_NAME}.yaml
-oc apply -f deploy/olm-catalog/${OPERATOR_NAME}/${OPERATOR_VERSION}/${OPERATOR_NAME}.v${OPERATOR_VERSION}.clusterserviceversion-${PROJECT_NAME}.yaml
-oc get ClusterServiceVersion ${OPERATOR_NAME}.v${OPERATOR_VERSION} -o json | jq '.status'
+sed -e "s|REPLACE_NAMESPACE|${PROJECT_NAME}|g" deploy/olm-catalog/${OPERATOR_NAME}/${OPERATOR_VERSION}/${OPERATOR_NAME}.${OPERATOR_VERSION}.clusterserviceversion.yaml > deploy/olm-catalog/${OPERATOR_NAME}/${OPERATOR_VERSION}/${OPERATOR_NAME}.${OPERATOR_VERSION}.clusterserviceversion-${PROJECT_NAME}.yaml
+oc apply -f deploy/olm-catalog/${OPERATOR_NAME}/${OPERATOR_VERSION}/${OPERATOR_NAME}.${OPERATOR_VERSION}.clusterserviceversion-${PROJECT_NAME}.yaml
+oc get ClusterServiceVersion ${OPERATOR_NAME}.${OPERATOR_VERSION} -o json | jq '.status'
 
 ### Create a subscription
 sed -e "s|REPLACE_NAMESPACE|${PROJECT_NAME}|g" deploy/${OPERATOR_NAME}-subscription.yaml > deploy/${OPERATOR_NAME}-subscription-${PROJECT_NAME}.yaml
