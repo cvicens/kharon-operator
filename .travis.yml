@@ -33,14 +33,14 @@ jobs:
       script:
         - ./build-operator.sh
         - echo "TRAVIS_TAG=${TRAVIS_TAG}"
-        - echo "$DOCKER_PASSWORD" | docker login -u "$DOCKER_USERNAME" --password-stdin
+        - echo "$DOCKER_PASSWORD" | docker login -u "$DOCKER_USERNAME" --password-stdin quay.io
         - ./push-operator.sh
 
     - stage: deploy-release
       script:
         - ./build-operator.sh
         - echo "TRAVIS_TAG=${TRAVIS_TAG}"
-        - echo "$DOCKER_PASSWORD" | docker login -u "$DOCKER_USERNAME" --password-stdin
+        - echo "$DOCKER_PASSWORD" | docker login -u "$DOCKER_USERNAME" --password-stdin quay.io
         - ./push-operator.sh
 stages:
   - name: deploy
