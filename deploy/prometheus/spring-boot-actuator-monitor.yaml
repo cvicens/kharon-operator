@@ -1,0 +1,16 @@
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  labels:
+    k8s-app: spring-boot-actuator-monitor
+  name: spring-boot-actuator-monitor
+spec:
+  endpoints:
+    - interval: 30s
+      path: /actuator/prometheus
+      port: 8080-tcp
+  namespaceSelector:
+    any: true
+  selector:
+    matchLabels:
+      team: spring-boot-actuator

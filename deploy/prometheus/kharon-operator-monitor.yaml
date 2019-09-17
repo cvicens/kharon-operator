@@ -1,0 +1,16 @@
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  labels:
+    k8s-app: kharon-operator-monitor
+  name: kharon-operator-monitor
+spec:
+  endpoints:
+    - interval: 10s
+      path: /metrics
+      port: custom-metrics
+  namespaceSelector:
+    any: true
+  selector:
+    matchLabels:
+      name: kharon-operator
