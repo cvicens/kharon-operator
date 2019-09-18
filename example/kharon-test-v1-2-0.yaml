@@ -1,0 +1,28 @@
+apiVersion: kharon.redhat.com/v1alpha1
+kind: Canary
+metadata:
+  name: kharon-test
+  labels:
+    app: kharon-test
+spec:
+  serviceName: kharon-test
+  enabled: true
+  type: Native
+  targetRefContainerPort: '8080-tcp' # If you don't specify this... maybe the order of ports is not correct and you'll get another port...
+  targetRef:
+    apiVersion: apps.openshift.io/v1
+    kind: DeploymentConfig
+    name: kharon-test-v1-2-0
+  canaryAnalysis:
+    metricsServer: 'http://prometheus-operated-monitoring.apps.cluster-kharon-eeae.kharon-eeae.open.redhat.com'
+    interval: 60
+    threshold: 3
+    maxWeight: 50
+    stepWeight: 10
+    metric:
+      name: max-error-rate
+      threshold: 15 
+      operator: 'lt'
+      interval: 10
+      #prometheusQuery: '(sum(api_http_errors_total{namespace="{{.Namespace}}",service="{{.Spec.TargetRef.Name}}"})/sum(api_http_requests_total{namespace="{{.Namespace}}",service="{{.Spec.TargetRef.Name}}"}))*100.0'
+      prometheusQuery: '(sum(increase(api_http_errors_total{namespace="{{.Namespace}}",service="{{.Spec.TargetRef.Name}}"}[5m]))/sum(increase(api_http_requests_total{namespace="{{.Namespace}}",service="{{.Spec.TargetRef.Name}}"}[5m])))*100.0'

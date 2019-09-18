@@ -1,0 +1,26 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: kharon-gen-err-v1-1-0
+spec:
+  backoffLimit: 4
+  template:
+    spec:
+      containers:
+      - name: worker
+        image: centos:7
+        env:
+        - name: SERVICE_HOST
+          value: "kharon-test-v1-1-0"
+        - name: SERVICE_PORT
+          value: '8080'
+        command:
+        - sh
+        - -c
+        - >
+          for i in {1..800} ;
+          do
+            curl -w "${SERVICE_HOST}->(%{http_code}) " -s -o /dev/null http://${SERVICE_HOST}:${SERVICE_PORT}/api/greeting?error=xyz && sleep 1 ;
+          done
+        imagePullPolicy: IfNotPresent
+      restartPolicy: Never
