@@ -9,11 +9,14 @@ spec:
       containers:
       - name: worker
         image: centos:7
+        env:
+        - name: TEST_DURATION # In seconds
+          value: "1800"
         command:
         - sh
         - -c
         - >
-          for j in {1..800} ;
+          for (( j=1; j <= ${TEST_DURATION}; j++ ))
           do
             for i in {0..2} ;
             do

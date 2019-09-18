@@ -162,11 +162,13 @@ In this case, because there are no previous releases... this Canary should be ex
 
 We check that this is so...
 
-```
+```json
 {"spec":{"to": {"kind": "Service","name": "ab-example-a","weight": 100}, "alternateBackends": []}}
+```
 
 or 
 
+```json
 {"spec":{"to": {"kind": "Service","name": "ab-example-a","weight": 100}}}
 ```
 
