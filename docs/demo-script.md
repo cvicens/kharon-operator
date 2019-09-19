@@ -45,6 +45,7 @@ In order to this we have prepared a script `deploy-demo.sh`, this script does th
 * Deploys the test application three times (one for each release). In a real situation you would eventually release and deploy in different points in time but we're doing it at once for the sake of simplicity
 * Expose the services so that you can try each release separately before actually exposing it to the real traffic. This is indeed optional but part of the script.
 * Label the Service object as `team=spring-boot-actuator` so that Prometheus can scrape metrics from them
+* Finally it deploys the operator itself
 
 Now please run the next command.
 
