@@ -22,6 +22,14 @@ oc new-project monitoring
 
 This needs to be done from the Openshift console
 
+> **WARNING 1!** Current version of Prometheus (version 0.27.0) has a buggy StatefulSet configuration... You have to change the memory assigned to container `rules-configmap-reloader` from 10Mi to 25Mi or more
+
+> **WARNING 2!** It's necessary to adjust permission for the Prometheus Operator service account, for instance"
+
+```sh
+oc adm policy add-cluster-role-to-user view system:serviceaccount:monitoring:prometheus-k8s
+```
+
 ## Deploy monitoring artifacts
 
 ```
@@ -128,7 +136,7 @@ Run the following command to generate some load.
 > Load is generated from a pod run as Kubernetes Job
 
 ```sh
-oc delete job kharon-gen-req ;  kubectl apply -f example/kharon-gen-req-job.yaml -n $PROJECT_NAME 
+oc delete job kharon-gen-req ;  oc apply -f example/kharon-gen-req-job.yaml -n $PROJECT_NAME 
 ```
 
 ### Trigger the canary relase for v1.1.0
@@ -150,7 +158,7 @@ oc describe canary kharon-test -n $PROJECT_NAME
 Run the following command to generate some errors.
 
 ```sh
-oc delete job kharon-gen-err-v1-1-0 ;  kubectl apply -f example/kharon-gen-err-v1-1-0-job.yaml -n $PROJECT_NAME 
+oc delete job kharon-gen-err-v1-1-0 ;  oc apply -f example/kharon-gen-err-v1-1-0-job.yaml -n $PROJECT_NAME 
 ```
 
 ### Check the status of the route 

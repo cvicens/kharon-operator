@@ -67,7 +67,7 @@ spec:
           "steppedLine": false,
           "targets": [
             {
-              "expr": "(sum(increase(api_http_errors_total[5m])) by (service) /sum(increase(api_http_requests_total [5m])) by (service) ) * 100.0",
+              "expr": "( increase(api_http_errors_total[2m]) / increase(api_http_requests_total[2m]) ) * 100.0",
               "format": "time_series",
               "hide": false,
               "instant": false,

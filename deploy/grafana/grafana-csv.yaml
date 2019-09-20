@@ -1,0 +1,14 @@
+apiVersion: operators.coreos.com/v1alpha1
+kind: Subscription
+metadata:
+  labels:
+    csc-owner-name: installed-community-monitoring
+    csc-owner-namespace: openshift-marketplace
+  name: grafana-operator
+spec:
+  channel: alpha
+  installPlanApproval: Automatic
+  name: grafana-operator
+  source: installed-community-monitoring
+  sourceNamespace: monitoring
+  startingCSV: grafana-operator.v1.3.0
