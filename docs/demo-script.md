@@ -33,8 +33,13 @@ oc adm policy add-cluster-role-to-user view system:serviceaccount:monitoring:pro
 ## Deploy monitoring artifacts
 
 ```
-oc apply -f ./deploy/prometheus -n monitoring
-oc apply -f ./deploy/grafana -n monitoring
+oc apply -f ./deploy/prometheus/server.yaml -n monitoring
+oc apply -f ./deploy/prometheus/spring-boot-actuator-monitor.yaml -n monitoring
+oc apply -f ./deploy/prometheus/kharon-operator-monitor.yaml -n monitoring
+
+oc apply -f ./deploy/grafana/grafana.yaml -n monitoring
+oc apply -f ./deploy/grafana/prometheus-datasource.yaml -n monitoring
+oc apply -f ./deploy/grafana/kharon-dashboard.yaml -n monitoring
 ```
 
 # Building and pushing the image of the operator if needed
