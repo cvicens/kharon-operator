@@ -20,26 +20,96 @@ oc new-project monitoring
 
 ## Install both Prometheus and Grafana operators in project monitoring
 
-This needs to be done from the Openshift console
+This needs to be done from the Openshift console. To do so, go to `Catalog->Operator Hub` and look for Prometheus and Grafana and install them. 
 
-> **WARNING 1!** Current version of Prometheus (version 0.27.0) has a buggy StatefulSet configuration... You have to change the memory assigned to container `rules-configmap-reloader` from 10Mi to 25Mi or more
+> **TIP:** You can check the status of the installation of the operators with the next command.
+>
+> ```sh
+> oc get csv -n monitoring
+> NAME                        DISPLAY               VERSION    REPLACES                    PHASE
+> grafana-operator.v1.3.0     Grafana Operator      1.3.0      
+> prometheusoperator.0.27.0   Prometheus Operator   0.27.0     prometheusoperator.0.22.2   Succeeded
+> ```
 
-> **WARNING 2!** It's necessary to adjust permission for the Prometheus Operator service account, for instance"
+> **NOTE:** Should you have any problem with installing the Grafana operator using the console try to create the Cluster Service Subscription using the next command.
+> 
+> ```sh
+> oc apply -f ./deploy/grafana/grafana-csv.yaml -n monitoring
+> ```
 
-```sh
-oc adm policy add-cluster-role-to-user view system:serviceaccount:monitoring:prometheus-k8s
-```
+Don't forget to select project `monitoring` before installing both operators.
 
 ## Deploy monitoring artifacts
+
+First be sure the operator was properly installed.
+
+```sh
+oc get pod -n monitoring | grep prometheus
+NAME                                   READY   STATUS    RESTARTS   AGE
+prometheus-operator-57d5d469bd-b8n2l   1/1     Running   0          2m52s
+```
+
+Then create the following custom resources (a Prometheus Server and a couple of Service Monitors to scrape metrics from Spring Boot apps and the Kharon Operator itself).
 
 ```
 oc apply -f ./deploy/prometheus/server.yaml -n monitoring
 oc apply -f ./deploy/prometheus/spring-boot-actuator-monitor.yaml -n monitoring
 oc apply -f ./deploy/prometheus/kharon-operator-monitor.yaml -n monitoring
+```
 
+> **WARNING 1!** Current version of Prometheus (version 0.27.0) has a buggy Statefulset configuration... You have to change the memory assigned to container `rules-configmap-reloader` from 10Mi to 25Mi or more
+
+For instance a good reason to think something is wrong regarding the Prometheus Statefulset is getting a `CreateContainerError` as in here.
+
+```sh
+oc get pod -n monitoring | grep prometheus
+NAME                                   READY   STATUS                 RESTARTS   AGE
+prometheus-operator-57d5d469bd-b8n2l   1/1     Running                0          14m
+prometheus-server-0                    2/3     CreateContainerError   1          82s
+prometheus-server-1                    2/3     CreateContainerError   1          82s
+```
+
+> **WARNING 2!** It's necessary to adjust permissions for the ***Prometheus Operator Service Account***, for instance:
+>
+> ```sh
+> oc adm policy add-cluster-role-to-user view system:serviceaccount:monitoring:prometheus-k8s
+> ```
+
+Now let's check if the Grafana Operator has been installed properly.
+
+```sh
+oc get pod -n monitoring | grep grafana
+grafana-operator-85c56c6464-g7cc5      1/1     Running   0          28m
+```
+
+Then create a bunch of custom resources (a Grafana object, a Data Source and Dashboard).
+
+```sh
 oc apply -f ./deploy/grafana/grafana.yaml -n monitoring
 oc apply -f ./deploy/grafana/prometheus-datasource.yaml -n monitoring
 oc apply -f ./deploy/grafana/kharon-dashboard.yaml -n monitoring
+```
+
+Now you can open a browser and point it to the Route created by the Grafana Operator.
+
+> **TIP:** Use **`https://`** to point your browser to **HOST/PORT**
+
+```sh
+oc get route -n monitoring
+NAME            HOST/PORT                                                                       PATH   SERVICES          PORT      TERMINATION   WILDCARD
+grafana-route   grafana-route-monitoring.apps.cluster-kharon.kharon.example.com          grafana-service   grafana   edge          None
+```
+
+There should be a dashboard called `Kharon Test Metrics`.
+
+**Reaching the Prometheus Server Service**
+
+Kharon Operator Canary objects check the state of a deployment by running a query against a Prometheus server periodically, hence it has to be possible for the operator to reach the Prometheus Server Service `http://prometheus-operated.monitoring:9090`. Be sure to check this is possible, for instance:
+
+```sh
+oc rsh -n $PROJECT_NAME deployment/kharon-operator
+sh-4.2$  curl -s 'http://prometheus-operated.monitoring:9090/api/v1/labels'
+{"status":"success","data":["__name__","action","area","cause","code","endpoint","exception","id","instance","job","method","name","namespace","outcome","pod","quantile","service","state","status","uri","version"]}
 ```
 
 # Building and pushing the image of the operator if needed
@@ -102,7 +172,7 @@ For now, let's create the Canary object.
 oc apply -f ./example/kharon-test-v1-0-0.yaml
 ```
 
-Because this is the first time our operator will create a Route called as the ServiceName property in the Canary object. In this case the name of the route should be `kharon-test`. Also because it's the first time... there's no actual Canary release so all the traffic will be routed to the Service of the first release, that is `kharon-test-v1-0-0`. Now is you get the Routes again you should get a new one as described before.
+Because this is the first time, our operator will create a Route called as the `spec->serviceName` property in the Canary object. In this case the name of the route should be `kharon-test`. Also because it's the first time... there's no actual Canary release so all the traffic will be routed to the Service of the first release, that is `kharon-test-v1-0-0`. Now is you get the Routes again you should get a new one as described before.
 
 ```sh
 oc get route -n $PROJECT_NAME 
