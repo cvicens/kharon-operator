@@ -24,5 +24,4 @@ spec:
       threshold: 15 
       operator: 'lt'
       interval: 10
-      #prometheusQuery: '(sum(api_http_errors_total{namespace="{{.Namespace}}",service="{{.Spec.TargetRef.Name}}"})/sum(api_http_requests_total{namespace="{{.Namespace}}",service="{{.Spec.TargetRef.Name}}"}))*100.0'
       prometheusQuery: '(sum(increase(api_http_errors_total{namespace="{{.Namespace}}",service="{{.Spec.TargetRef.Name}}"}[5m]))/sum(increase(api_http_requests_total{namespace="{{.Namespace}}",service="{{.Spec.TargetRef.Name}}"}[5m])))*100.0'
