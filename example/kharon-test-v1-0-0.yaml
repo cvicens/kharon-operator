@@ -14,7 +14,7 @@ spec:
     kind: DeploymentConfig
     name: kharon-test-v1-0-0
   canaryAnalysis:
-    metricsServer: 'http://prometheus-operated-monitoring.apps.cluster-kharon-5947.kharon-5947.open.redhat.com'
+    metricsServer: 'http://prometheus-operated.monitoring:9090'
     interval: 60
     threshold: 3
     maxWeight: 50
