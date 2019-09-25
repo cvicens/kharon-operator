@@ -31,8 +31,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/runtime/signals"
 
 	// Metrics... for now
-	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
@@ -48,14 +46,6 @@ const (
 	// Custom Metrics Port Name
 	customMetricsPortName       = "custom-metrics"
 	customMetricsPort     int32 = 8989
-)
-
-// Metrics... for now
-var (
-	opsProcessed = promauto.NewCounter(prometheus.CounterOpts{
-		Name: "myapp_processed_ops_total",
-		Help: "The total number of processed events",
-	})
 )
 
 func printVersion() {
