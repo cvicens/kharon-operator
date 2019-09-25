@@ -6,8 +6,4 @@
 
 The Kharon Operator for Kubernetes pretends to help you in applying advanced deployment technics.
 
-There a demo script you can run [here](./docs/demo-script.md)
-
-There a log/making-of [here](./docs/making-of.md)
-
-
+There is a demo script you can run [here](./docs/demo-script.md).
