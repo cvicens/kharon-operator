@@ -23,7 +23,6 @@ spec:
       "editable": true,
       "gnetId": null,
       "graphTooltip": 0,
-      "id": 5,
       "links": [],
       "panels": [
         {
@@ -65,7 +64,9 @@ spec:
             {
               "expr": "kharon_current_canary_metric_value",
               "format": "time_series",
+              "hide": false,
               "intervalFactor": 1,
+              "legendFormat": "{{namespace}}/canary={{canary}}/target={{target}}",
               "refId": "A"
             }
           ],
@@ -89,11 +90,12 @@ spec:
           },
           "yaxes": [
             {
-              "format": "short",
+              "decimals": null,
+              "format": "percent",
               "label": null,
               "logBase": 1,
-              "max": null,
-              "min": null,
+              "max": "100",
+              "min": "0",
               "show": true
             },
             {
@@ -149,7 +151,9 @@ spec:
             {
               "expr": "( increase(api_http_errors_total[2m]) / increase(api_http_requests_total[2m]) ) * 100.0",
               "format": "time_series",
+              "hide": false,
               "intervalFactor": 1,
+              "legendFormat": "{{namespace}}/target={{service}} (api={{api}},method={{method}})",
               "refId": "A"
             }
           ],
@@ -173,11 +177,11 @@ spec:
           },
           "yaxes": [
             {
-              "format": "short",
+              "format": "percent",
               "label": null,
               "logBase": 1,
-              "max": null,
-              "min": null,
+              "max": "100",
+              "min": "0",
               "show": true
             },
             {
@@ -257,11 +261,12 @@ spec:
           },
           "yaxes": [
             {
-              "format": "short",
+              "decimals": null,
+              "format": "percent",
               "label": null,
               "logBase": 1,
-              "max": null,
-              "min": null,
+              "max": "100",
+              "min": "0",
               "show": true
             },
             {
@@ -279,6 +284,7 @@ spec:
           }
         }
       ],
+      "refresh": "5s",
       "schemaVersion": 18,
       "style": "dark",
       "tags": [],
@@ -286,7 +292,7 @@ spec:
         "list": []
       },
       "time": {
-        "from": "now-6h",
+        "from": "now-15m",
         "to": "now"
       },
       "timepicker": {
@@ -317,7 +323,7 @@ spec:
       "timezone": "",
       "title": "Kharon Test Metrics",
       "uid": "Lq4WdOpWz",
-      "version": 4
+      "version": 2
     }
   name: kharon-dashboard.json
 
